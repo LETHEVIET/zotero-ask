@@ -1,5 +1,16 @@
 import { LLMClient } from "./llm";
 import { type Tool } from "./tools";
+import {
+  stripAllThinking,
+  shouldSummarize,
+  applySummarization,
+} from "./summarization";
+
+export type TokenUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
 
 export type StreamCallbacks = {
   onToken: (token: string) => void;
@@ -7,8 +18,9 @@ export type StreamCallbacks = {
   onToolCall?: (toolName: string) => void;
   onToolResult?: (toolName: string, result: string) => void;
   onRequestDebug?: (body: any) => void;
-  onComplete?: () => void;
+  onComplete?: (usage?: TokenUsage) => void;
   onError?: (error: Error) => void;
+  onSummarize?: () => void;
 };
 
 type Message = {
@@ -25,7 +37,20 @@ export class Agent {
     this.client = new LLMClient();
   }
 
+  // Accumulated token usage across all model calls in this run
+  private totalUsage: TokenUsage = {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  };
+
   async run(messages: Message[], callbacks: StreamCallbacks, tools?: Tool[]) {
+    // Reset usage for this run
+    this.totalUsage = {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+    };
     // 1. Prepare Tools for LLM
     const openAiTools =
       tools && tools.length > 0
@@ -60,6 +85,31 @@ export class Agent {
      * - If no tool_calls: -> End (call callbacks.onComplete)
      */
 
+    // Strip <think> blocks from all messages before sending
+    stripAllThinking(messages);
+
+    // Check if summarization is needed
+    if (shouldSummarize(messages)) {
+      Zotero.debug(
+        `[ZoteroAsk] Context exceeds limit — summarizing conversation`,
+      );
+      if (callbacks.onSummarize) {
+        callbacks.onSummarize();
+      }
+      try {
+        const compressed = await applySummarization(messages);
+        // Replace messages array contents in-place
+        messages.length = 0;
+        messages.push(...compressed);
+        Zotero.debug(
+          `[ZoteroAsk] Summarization complete — ${messages.length} messages remain`,
+        );
+      } catch (e: any) {
+        Zotero.debug(`[ZoteroAsk] Summarization failed: ${e.message}`);
+        // Continue with full messages if summarization fails
+      }
+    }
+
     await this.client.streamChat(
       messages,
       {
@@ -67,7 +117,14 @@ export class Agent {
         onError: callbacks.onError,
         onRequestDebug: callbacks.onRequestDebug,
         onToolCall: callbacks.onToolCall,
-        onComplete: async (accumulatedContent, toolCalls) => {
+        onComplete: async (accumulatedContent, toolCalls, usage) => {
+          // Accumulate usage from this model call
+          if (usage) {
+            this.totalUsage.prompt_tokens += usage.prompt_tokens || 0;
+            this.totalUsage.completion_tokens += usage.completion_tokens || 0;
+            this.totalUsage.total_tokens += usage.total_tokens || 0;
+          }
+
           // Decide next step
           if (toolCalls && toolCalls.length > 0) {
             // Transition to Tool Node
@@ -89,7 +146,9 @@ export class Agent {
           } else {
             // End of chain
             if (callbacks.onComplete) {
-              callbacks.onComplete();
+              callbacks.onComplete(
+                this.totalUsage.total_tokens > 0 ? this.totalUsage : undefined,
+              );
             }
           }
         },

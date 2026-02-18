@@ -1,10 +1,12 @@
 import { marked } from "marked";
 import { getPref } from "../../utils/prefs";
+import { type TokenUsage } from "../../services/agent";
 import {
   getModels,
   getActiveModelConfig,
   setActiveModelId,
 } from "../../services/llm";
+import { estimateTokens, getContextLimit } from "../../services/summarization";
 import { ICONS } from "./icons";
 import { DEFAULT_SYSTEM_PROMPT } from "./constants";
 
@@ -25,6 +27,7 @@ export class ChatUI {
   private sendBtn!: HTMLButtonElement;
   private modelSelector!: HTMLElement;
   private modelSelectorLabel!: HTMLElement;
+  private tokenCounterEl!: HTMLElement;
 
   constructor(private container: HTMLElement) {
     this.renderInitialUI();
@@ -44,6 +47,7 @@ export class ChatUI {
   clearChat() {
     this.history = [];
     if (this.messagesArea) this.messagesArea.innerHTML = "";
+    this.updateTokenCounter();
   }
 
   private renderInitialUI() {
@@ -190,8 +194,10 @@ export class ChatUI {
     this.selectionContainer.style.flexShrink = "1";
 
     const quoteIcon = this.createSvgIcon(ICONS.Quote, 12);
-    quoteIcon.style.flexShrink = "0";
-    this.selectionContainer.appendChild(quoteIcon);
+    if (quoteIcon) {
+      quoteIcon.style.flexShrink = "0";
+      this.selectionContainer.appendChild(quoteIcon);
+    }
 
     this.selectionTextSpan =
       this.container.ownerDocument!.createElement("span");
@@ -203,7 +209,7 @@ export class ChatUI {
     const closeSelectionBtn =
       this.container.ownerDocument!.createElement("div");
     const closeIcon = this.createSvgIcon(ICONS.X, 10);
-    closeSelectionBtn.appendChild(closeIcon);
+    if (closeIcon) closeSelectionBtn.appendChild(closeIcon);
     closeSelectionBtn.style.cursor = "pointer";
     closeSelectionBtn.style.flexShrink = "0";
     closeSelectionBtn.style.display = "flex";
@@ -244,8 +250,10 @@ export class ChatUI {
     this.modelSelector.appendChild(this.modelSelectorLabel);
 
     const chevron = this.createSvgIcon(ICONS.ChevronDown, 12);
-    chevron.style.flexShrink = "0";
-    this.modelSelector.appendChild(chevron);
+    if (chevron) {
+      chevron.style.flexShrink = "0";
+      this.modelSelector.appendChild(chevron);
+    }
 
     this.updateModelSelectorLabel();
 
@@ -254,6 +262,18 @@ export class ChatUI {
     };
 
     trayLeft.appendChild(this.modelSelector);
+
+    // Token counter — shows e.g. "2.1k / 16k"
+    this.tokenCounterEl = this.container.ownerDocument!.createElement("span");
+    this.tokenCounterEl.style.fontSize = "10px";
+    this.tokenCounterEl.style.color = "var(--material-text-medium, #8b949e)";
+    this.tokenCounterEl.style.whiteSpace = "nowrap";
+    this.tokenCounterEl.style.marginLeft = "auto";
+    this.tokenCounterEl.style.marginRight = "6px";
+    this.tokenCounterEl.style.flexShrink = "0";
+    this.tokenCounterEl.title = "Current context size / Limit";
+    trayLeft.appendChild(this.tokenCounterEl);
+    this.updateTokenCounter();
 
     // Right side — send button
     this.sendBtn = this.container.ownerDocument!.createElement("button");
@@ -272,7 +292,7 @@ export class ChatUI {
     this.sendBtn.style.transition = "background 0.15s";
 
     const sendIcon = this.createSvgIcon(ICONS.Send, 14, "#fff");
-    this.sendBtn.appendChild(sendIcon);
+    if (sendIcon) this.sendBtn.appendChild(sendIcon);
 
     this.sendBtn.onmouseover = () => {
       this.sendBtn.style.backgroundColor = "#333";
@@ -293,6 +313,78 @@ export class ChatUI {
   private updateModelSelectorLabel() {
     const active = getActiveModelConfig();
     this.modelSelectorLabel.textContent = active?.name || "Select Model";
+  }
+
+  private estimateStepsTokens(
+    steps: any[],
+    ignoreModelContent = false,
+  ): number {
+    let chars = 0;
+    for (const s of steps) {
+      if (s.type === "model") {
+        if (!ignoreModelContent) chars += (s.content || "").length;
+      } else if (s.type === "tool") {
+        chars += (s.fullResult || s.result || "").length;
+        if (s.args) chars += JSON.stringify(s.args).length;
+      }
+    }
+    return Math.ceil(chars / 4);
+  }
+
+  private getItemContextString(): string {
+    const item = this.currentItem;
+    if (!item) return "";
+    const itemMetadata = [
+      `Title: ${item.getField("title")}`,
+      `Item Type: ${item.itemType}`,
+      `Date: ${item.getField("date")}`,
+      `Creators: ${item
+        .getCreatorsJSON()
+        .map((c: any) =>
+          c.firstName ? `${c.firstName} ${c.lastName}` : c.name,
+        )
+        .join(", ")}`,
+      `Abstract: ${item.getField("abstractNote") || "N/A"}`,
+    ].join("\n");
+    return `Current Document Context:\n${itemMetadata}`;
+  }
+
+  private updateTokenCounter(
+    extraSteps: any[] = [],
+    ignoreModelContent = false,
+  ) {
+    if (!this.tokenCounterEl) return;
+
+    let total = 0;
+
+    // 1. Static Context (System Prompt + Item Metadata)
+    const systemPrompt =
+      (getPref("system_prompt") as string) || DEFAULT_SYSTEM_PROMPT;
+    if (systemPrompt) total += Math.ceil(systemPrompt.length / 4);
+
+    const itemContext = this.getItemContextString();
+    if (itemContext) total += Math.ceil(itemContext.length / 4);
+
+    // 2. Message History
+    total += estimateTokens(this.history as any);
+
+    // 3. Current Steps (Streaming content + Tool results)
+    if (extraSteps.length > 0) {
+      total += this.estimateStepsTokens(extraSteps, ignoreModelContent);
+    }
+
+    const limit = getContextLimit();
+    const fmt = (n: number) =>
+      n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+    this.tokenCounterEl.textContent = `${fmt(total)} / ${fmt(limit)}`;
+    const ratio = total / limit;
+    if (ratio >= 0.9) {
+      this.tokenCounterEl.style.color = "#d1242f";
+    } else if (ratio >= 0.75) {
+      this.tokenCounterEl.style.color = "#bf8700";
+    } else {
+      this.tokenCounterEl.style.color = "var(--material-text-medium, #8b949e)";
+    }
   }
 
   private showModelPopup() {
@@ -348,6 +440,7 @@ export class ChatUI {
       item.onclick = () => {
         setActiveModelId(m.id);
         this.updateModelSelectorLabel();
+        this.updateTokenCounter();
         popup.remove();
       };
       popup.appendChild(item);
@@ -355,16 +448,18 @@ export class ChatUI {
 
     (doc.documentElement ?? doc.body)!.appendChild(popup);
 
-    // Close on outside click
+    // Close on outside click — delay to avoid immediate trigger from the
+    // same click that opened the popup
     const closeHandler = (ev: MouseEvent) => {
-      if (!popup.contains(ev.target as Node)) {
+      const target = ev.target as Node;
+      if (!popup.contains(target) && !this.modelSelector.contains(target)) {
         popup.remove();
         doc.removeEventListener("click", closeHandler, true);
       }
     };
     setTimeout(() => {
       doc.addEventListener("click", closeHandler, true);
-    }, 0);
+    }, 50);
   }
 
   private registerReaderListener() {
@@ -426,6 +521,7 @@ export class ChatUI {
         this.appendMessage(value, "You", userMsgId);
       }
       this.history.push({ role: "user", content: fullMessage, id: userMsgId });
+      this.updateTokenCounter();
 
       this.textarea.value = "";
       this.textarea.style.height = "auto";
@@ -448,7 +544,9 @@ export class ChatUI {
           name: string;
           args?: any;
           result?: string;
-        };
+          fullResult?: string;
+        }
+      | { type: "summarize"; status: "running" | "done" };
     const reasoningSteps: ReasoningStep[] = [];
     // Start with a model thinking step
     reasoningSteps.push({ type: "model", status: "thinking", content: "" });
@@ -479,24 +577,12 @@ export class ChatUI {
       }
 
       // Context: Current Item Metadata
-      const item = this.currentItem;
-      if (item) {
-        const itemMetadata = [
-          `Title: ${item.getField("title")}`,
-          `Item Type: ${item.itemType}`,
-          `Date: ${item.getField("date")}`,
-          `Creators: ${item
-            .getCreatorsJSON()
-            .map((c: any) =>
-              c.firstName ? `${c.firstName} ${c.lastName}` : c.name,
-            )
-            .join(", ")}`,
-          `Abstract: ${item.getField("abstractNote") || "N/A"}`,
-        ].join("\n");
-
+      // Context: Current Item Metadata
+      const itemContext = this.getItemContextString();
+      if (itemContext) {
         cleanHistory.push({
           role: "system",
-          content: `Current Document Context:\n${itemMetadata}`,
+          content: itemContext,
         });
       }
 
@@ -506,6 +592,21 @@ export class ChatUI {
         cleanHistory as any,
         {
           onToken: async (token: string) => {
+            // If we just finished summarizing, mark that step done
+            const lastSummarize = [...reasoningSteps]
+              .reverse()
+              .find((s) => s.type === "summarize");
+            if (lastSummarize && lastSummarize.status === "running") {
+              lastSummarize.status = "done";
+              // Push a new model step for the post-summary response
+              reasoningSteps.push({
+                type: "model",
+                status: "thinking",
+                content: "",
+              });
+              currentStepText = "";
+            }
+
             currentStepText += token;
             aiResponseText += token;
             // Update the current model step content
@@ -517,6 +618,8 @@ export class ChatUI {
             }
             const html = await this.buildAgentResponseHtml(reasoningSteps);
             updateAiMessage(html);
+            // Update token counter with streaming text estimate
+            this.updateTokenCounter(reasoningSteps);
           },
           onRequestDebug: (payload: any) => {
             this.lastDebugPayload = payload;
@@ -536,9 +639,10 @@ export class ChatUI {
               name: toolName,
               args,
             });
-            this.buildAgentResponseHtml(reasoningSteps).then((h) =>
-              updateAiMessage(h),
-            );
+            this.buildAgentResponseHtml(reasoningSteps).then((h) => {
+              updateAiMessage(h);
+              this.updateTokenCounter(reasoningSteps);
+            });
           },
           onToolResult: async (toolName: string, result: string) => {
             // Update the last tool step with result
@@ -547,6 +651,7 @@ export class ChatUI {
               .find((s) => s.type === "tool");
             if (lastToolStep && lastToolStep.type === "tool") {
               lastToolStep.status = "done";
+              lastToolStep.fullResult = result;
               lastToolStep.result =
                 result.length > 200 ? result.substring(0, 200) + "..." : result;
             }
@@ -559,8 +664,9 @@ export class ChatUI {
             currentStepText = "";
             const html = await this.buildAgentResponseHtml(reasoningSteps);
             updateAiMessage(html);
+            this.updateTokenCounter(reasoningSteps);
           },
-          onComplete: async () => {
+          onComplete: async (usage?: TokenUsage) => {
             // Mark final model step as done
             const lastModelStep = [...reasoningSteps]
               .reverse()
@@ -574,15 +680,41 @@ export class ChatUI {
               content: aiResponseText,
               id: aiMsgId,
             });
-            const html = await this.buildAgentResponseHtml(reasoningSteps);
+            let html = await this.buildAgentResponseHtml(reasoningSteps);
+            // Append token usage footer
+            if (usage) {
+              const style =
+                "margin-top:8px;padding-top:6px;border-top:1px solid var(--material-divider, rgba(0,0,0,0.08));font-size:10px;color:var(--material-text-medium, #8b949e);display:flex;gap:10px;";
+              const title =
+                "Total tokens processed for this turn (Cumulative of all steps)";
+              html += `<div title="${title}" style="${style}">`;
+              html += `<span>↑ ${usage.prompt_tokens.toLocaleString()}</span>`;
+              html += `<span>↓ ${usage.completion_tokens.toLocaleString()}</span>`;
+              html += `<span>Σ ${usage.total_tokens.toLocaleString()}</span>`;
+              html += `</div>`;
+            }
             updateAiMessage(html);
             this.enableInput();
+            this.updateTokenCounter(reasoningSteps, true);
           },
           onError: (err: Error) => {
             updateAiMessage(
               `<span style="color:red">Error: ${err.message}</span>`,
             );
             this.enableInput();
+          },
+          onSummarize: () => {
+            // Mark current model step as done (if any)
+            const lastModelStep = [...reasoningSteps]
+              .reverse()
+              .find((s) => s.type === "model");
+            if (lastModelStep && lastModelStep.type === "model") {
+              lastModelStep.status = "done";
+            }
+            reasoningSteps.push({ type: "summarize", status: "running" });
+            this.buildAgentResponseHtml(reasoningSteps).then((h) =>
+              updateAiMessage(h),
+            );
           },
         },
         registry.getTools(),
@@ -796,6 +928,14 @@ export class ChatUI {
         } else if (isRunning) {
           html += `<div style="margin:2px 0 8px 22px;font-size:0.78em;color:#888;font-style:italic;">Running...</div>`;
         }
+      } else if (step.type === "summarize") {
+        const icon =
+          step.status === "running" ? ICONS.Loader : ICONS.CircleCheck;
+        const color = step.status === "running" ? "#888" : "#1a7f37";
+        html += `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;font-size:0.85em;">`;
+        html += `<span style="display:flex;color:${color};">${icon}</span>`;
+        html += `<span style="color:#666;font-style:italic;">Summarizing conversation...</span>`;
+        html += `</div>`;
       }
     }
 
@@ -872,7 +1012,8 @@ export class ChatUI {
     btn.style.borderRadius = "4px";
     btn.style.color = "var(--material-text-medium, #6e7781)";
     btn.title = title;
-    btn.appendChild(this.createSvgIcon(svg, 20));
+    const icon = this.createSvgIcon(svg, 20);
+    if (icon) btn.appendChild(icon);
     btn.onclick = onClick;
     btn.onmouseover = () => {
       btn.style.color = "var(--material-text-color, #24292f)";
@@ -890,18 +1031,37 @@ export class ChatUI {
     return btn;
   }
 
-  private createSvgIcon(svgString: string, size = 16, color = "currentColor") {
-    const temp = this.container.ownerDocument!.createElement("div");
-    temp.innerHTML = svgString;
-    const svg = temp.firstElementChild as HTMLElement;
-    if (svg) {
+  private createSvgIcon(
+    svgString: string,
+    size = 16,
+    color = "currentColor",
+  ): HTMLElement | null {
+    // Use DOMParser with SVG MIME type to properly handle XML namespaces
+    // in Zotero's XHTML context (div.innerHTML doesn't work for SVG)
+    try {
+      const parser = new DOMParser();
+      const svgDoc = parser.parseFromString(svgString, "image/svg+xml");
+      const parsedSvg = svgDoc.documentElement;
+
+      // Check for parse errors
+      if (!parsedSvg || parsedSvg.tagName === "parsererror") {
+        Zotero.debug(`[ZoteroAsk] SVG parse error`);
+        return null;
+      }
+
+      // Import the node into the current document
+      const doc = this.container.ownerDocument!;
+      const svg = doc.importNode(parsedSvg, true) as HTMLElement;
       svg.setAttribute("width", size.toString());
       svg.setAttribute("height", size.toString());
       if (color !== "currentColor") {
         svg.style.stroke = color;
       }
+      return svg;
+    } catch (e: any) {
+      Zotero.debug(`[ZoteroAsk] createSvgIcon error: ${e.message}`);
+      return null;
     }
-    return svg;
   }
 
   private generateId() {

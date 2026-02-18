@@ -88,6 +88,7 @@
             document.getElementById("font_size").value = prefs.get(prefix + ".font_size", true) || "medium";
             document.getElementById("theme").value = prefs.get(prefix + ".theme", true) || "auto";
             document.getElementById("system_prompt").value = prefs.get(prefix + ".system_prompt", true) || "";
+            document.getElementById("context_limit").value = prefs.get(prefix + ".context_limit", true) || "16000";
 
             // Load models
             let modelsJson = prefs.get(prefix + ".models", true) || "[]";
@@ -158,6 +159,7 @@
                 document.getElementById("m_api_url").value = m.api_url || "";
                 document.getElementById("m_api_keys").value = (m.api_keys || []).join("\n");
                 document.getElementById("m_model").value = m.model || "";
+                document.getElementById("m_context_limit").value = m.context_limit || "";
                 setFormEnabled(true);
             } else {
                 clearForm();
@@ -169,6 +171,7 @@
             document.getElementById("m_api_url").value = "";
             document.getElementById("m_api_keys").value = "";
             document.getElementById("m_model").value = "";
+            document.getElementById("m_context_limit").value = "";
             setFormEnabled(false);
         }
 
@@ -177,6 +180,7 @@
             document.getElementById("m_api_url").disabled = !enabled;
             document.getElementById("m_api_keys").disabled = !enabled;
             document.getElementById("m_model").disabled = !enabled;
+            document.getElementById("m_context_limit").disabled = !enabled;
         }
 
         function syncFormToModel() {
@@ -186,6 +190,8 @@
             models[selectedIdx].api_keys = document.getElementById("m_api_keys").value
                 .split("\n").map(function(k) { return k.trim(); }).filter(function(k) { return k.length > 0; });
             models[selectedIdx].model = document.getElementById("m_model").value;
+            var ctxVal = document.getElementById("m_context_limit").value.trim();
+            models[selectedIdx].context_limit = ctxVal ? parseInt(ctxVal, 10) || undefined : undefined;
             renderModelList();
         }
 
@@ -225,6 +231,7 @@
             prefs.set(prefix + ".font_size", document.getElementById("font_size").value, true);
             prefs.set(prefix + ".theme", document.getElementById("theme").value, true);
             prefs.set(prefix + ".system_prompt", document.getElementById("system_prompt").value, true);
+            prefs.set(prefix + ".context_limit", document.getElementById("context_limit").value, true);
 
             // Models
             prefs.set(prefix + ".models", JSON.stringify(models), true);
@@ -278,6 +285,10 @@
 
                         <html:label data-l10n-id="zoteroask-chat-settings-system-prompt" for="system_prompt" style="font-weight: bold; display: block; margin-bottom: 4px;"></html:label>
                         <html:textarea id="system_prompt" rows="6" style="width: 100%; font-family: monospace; box-sizing: border-box; resize: vertical;" placeholder="Default: You are a helpful assistant built into Zotero..."/>
+
+                        <html:label for="context_limit" style="font-weight: bold; display: block; margin-bottom: 4px; margin-top: 15px;">Context Limit (tokens)</html:label>
+                        <html:input id="context_limit" type="number" style="width: 120px; margin-bottom: 4px;" placeholder="16000"/>
+                        <html:span style="font-size: 10px; color: #888; display: block;">Conversation is automatically summarized when it exceeds this token count. Per-model limits override this value.</html:span>
                     </html:div>
                 </tabpanel>
 
@@ -304,6 +315,10 @@
 
                             <html:label for="m_model">Model ID</html:label>
                             <html:input id="m_model" type="text" placeholder="e.g. gpt-4o, claude-3-opus" oninput="syncFormToModel()"/>
+
+                            <html:label for="m_context_limit">Context Limit (tokens)</html:label>
+                            <html:input id="m_context_limit" type="number" placeholder="Leave blank to use global default" oninput="syncFormToModel()"/>
+                            <html:span class="hint">Optional — overrides the global context limit for this model</html:span>
                         </html:div>
                     </html:div>
                 </tabpanel>

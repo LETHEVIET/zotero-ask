@@ -9,6 +9,7 @@ export type ModelConfig = {
   api_url: string;
   api_keys: string[];
   model: string;
+  context_limit?: number; // per-model token limit override
 };
 
 // Round-robin key index tracker (per model id)
@@ -72,7 +73,15 @@ export function setActiveModelId(id: string) {
 type LLMStreamCallbacks = {
   onToken: (token: string) => void;
   onToolCall?: (toolName: string) => void;
-  onComplete?: (fullContent: string, toolCalls: any[]) => void | Promise<void>; // Allow async handlers
+  onComplete?: (
+    fullContent: string,
+    toolCalls: any[],
+    usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    },
+  ) => void | Promise<void>;
   onError?: (error: Error) => void;
   onRequestDebug?: (body: any) => void;
 };
@@ -104,6 +113,7 @@ export class LLMClient {
         model: model,
         messages: messages,
         stream: true,
+        stream_options: { include_usage: true },
       };
 
       if (tools && tools.length > 0) {
@@ -139,6 +149,13 @@ export class LLMClient {
       // Tool Call Accumulation
       const currentToolCalls: any[] = [];
       let accumulatedContent = "";
+      let usage:
+        | {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+          }
+        | undefined;
 
       while (true) {
         const { done, value } = await (reader as any).read();
@@ -165,6 +182,11 @@ export class LLMClient {
             if (delta?.content) {
               accumulatedContent += delta.content;
               callbacks.onToken(delta.content);
+            }
+
+            // Capture usage from the final chunk
+            if (data.usage) {
+              usage = data.usage;
             }
 
             // Handle Tool Calls
@@ -203,7 +225,7 @@ export class LLMClient {
 
       if (callbacks.onComplete) {
         // Await onComplete so async agent loops (tool execution + next model call) are properly tracked
-        await callbacks.onComplete(accumulatedContent, currentToolCalls);
+        await callbacks.onComplete(accumulatedContent, currentToolCalls, usage);
       }
     } catch (error) {
       Zotero.debug(`LLM Stream Error: ${error}`);

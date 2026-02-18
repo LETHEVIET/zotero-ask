@@ -14,6 +14,7 @@ declare namespace _ZoteroTypes {
       "model": string;
       "models": string;
       "active_model_id": string;
+      "context_limit": string;
     };
   }
 }
