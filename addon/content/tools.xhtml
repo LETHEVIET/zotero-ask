@@ -11,7 +11,7 @@
         <![CDATA[
         // window.arguments[0] = { tools: [{name, description, parameters}], executeTool: async (name, args) => string }
         window.onload = function() {
-            const { tools, executeTool } = window.arguments[0];
+            const { tools, executeTool, toggleTool } = window.arguments[0];
             const container = document.getElementById("tools-container");
 
             if (!tools || tools.length === 0) {
@@ -26,17 +26,41 @@
                 const card = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
                 card.style.cssText = "border:1px solid #d0d7de;border-radius:8px;overflow:hidden;margin-bottom:12px;";
 
-                // Tool header
+                // Tool header with checkbox
                 const toolHeader = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-                toolHeader.style.cssText = "padding:10px 12px;background:#f6f8fa;border-bottom:1px solid #d0d7de;";
+                toolHeader.style.cssText = "padding:10px 12px;background:#f6f8fa;border-bottom:1px solid #d0d7de;display:flex;align-items:flex-start;gap:8px;";
+
+                const checkbox = document.createElementNS("http://www.w3.org/1999/xhtml", "input");
+                checkbox.type = "checkbox";
+                checkbox.checked = tool.enabled !== false;
+                checkbox.style.cssText = "margin-top:2px;cursor:pointer;flex-shrink:0;";
+
+                const cardBody = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                cardBody.className = "card-body";
+
+                const updateDisabledState = function() {
+                    cardBody.style.opacity = checkbox.checked ? "1" : "0.4";
+                    cardBody.style.pointerEvents = checkbox.checked ? "auto" : "none";
+                };
+
+                checkbox.addEventListener("change", function() {
+                    if (toggleTool) toggleTool(tool.name, checkbox.checked);
+                    updateDisabledState();
+                });
+
+                const headerText = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                headerText.style.cssText = "flex:1;min-width:0;";
                 const nameEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
                 nameEl.style.cssText = "font-size:13px;font-weight:600;color:#24292f;";
                 nameEl.textContent = tool.name.replace(/_/g, " ");
                 const descEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
                 descEl.style.cssText = "font-size:11px;color:#666;margin-top:2px;";
                 descEl.textContent = tool.description;
-                toolHeader.appendChild(nameEl);
-                toolHeader.appendChild(descEl);
+                headerText.appendChild(nameEl);
+                headerText.appendChild(descEl);
+
+                toolHeader.appendChild(checkbox);
+                toolHeader.appendChild(headerText);
                 card.appendChild(toolHeader);
 
                 // Parameters
@@ -58,7 +82,7 @@
                         row.appendChild(meta);
                         paramsDiv.appendChild(row);
                     }
-                    card.appendChild(paramsDiv);
+                    cardBody.appendChild(paramsDiv);
                 }
 
                 // Execute area
@@ -117,7 +141,10 @@
 
                 execDiv.appendChild(runBtn);
                 execDiv.appendChild(resultPre);
-                card.appendChild(execDiv);
+                cardBody.appendChild(execDiv);
+
+                card.appendChild(cardBody);
+                updateDisabledState();
                 container.appendChild(card);
             }
         };

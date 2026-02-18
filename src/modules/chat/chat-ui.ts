@@ -1,124 +1,9 @@
 import { marked } from "marked";
-import { getLocaleID, getString } from "../utils/locale";
-import { getPref, setPref } from "../utils/prefs";
+import { getPref } from "../../utils/prefs";
+import { ICONS } from "./icons";
+import { DEFAULT_SYSTEM_PROMPT } from "./constants";
 
-// Inline Lucide Icons
-const ICONS = {
-  ArrowUp: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>`,
-  Settings: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
-  Trash: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`,
-  Refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>`,
-  Copy: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
-  Check: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
-  Bug: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>`,
-};
-
-const DEFAULT_SYSTEM_PROMPT =
-  "You are a helpful assistant built into Zotero. You help users understand their documents, summarize content, and answer research-related questions.";
-
-// Manage active UI instances
-const activeChatUIs: { [key: string]: ChatUI } = {};
-
-export function registerChatPanel() {
-  Zotero.ItemPaneManager.registerSection({
-    paneID: "zotero-ask-chat",
-    pluginID: addon.data.config.addonID,
-    header: {
-      l10nID: getLocaleID("chat-panel-header" as any),
-      icon: "chrome://zoteroask/content/icons/icon-16.svg",
-    },
-    sidenav: {
-      l10nID: getLocaleID("chat-panel-sidenav" as any),
-      icon: "chrome://zoteroask/content/icons/icon-20.svg",
-    },
-    sectionButtons: [
-      {
-        type: "clear",
-        icon: "chrome://zoteroask/content/icons/icon-trash.svg",
-        l10nID: getLocaleID("chat-clear-title" as any) || "Clear Chat",
-        onClick: () => {
-          const item = Zotero.getActiveZoteroPane().getSelectedItems()[0];
-          if (!item) return;
-          const chatUI = Object.values(activeChatUIs).find(
-            (ui) => ui.currentItem?.id === item.id,
-          );
-          chatUI?.clearChat();
-        },
-      },
-      {
-        type: "debug",
-        icon: "chrome://zoteroask/content/icons/icon-bug.svg",
-        l10nID: getLocaleID("chat-debug-title" as any) || "Debug",
-        onClick: () => {
-          const item = Zotero.getActiveZoteroPane().getSelectedItems()[0];
-          if (!item) return;
-          const chatUI = Object.values(activeChatUIs).find(
-            (ui) => ui.currentItem?.id === item.id,
-          );
-          chatUI?.showDebugModal();
-        },
-      },
-      {
-        type: "tools",
-        icon: "chrome://zoteroask/content/icons/icon-tools.svg",
-        l10nID: getLocaleID("chat-tools-title" as any) || "Tools",
-        onClick: () => {
-          const item = Zotero.getActiveZoteroPane().getSelectedItems()[0];
-          if (!item) return;
-          const chatUI = Object.values(activeChatUIs).find(
-            (ui) => ui.currentItem?.id === item.id,
-          );
-          chatUI?.showToolsModal();
-        },
-      },
-      {
-        type: "settings",
-        icon: "chrome://zoteroask/content/icons/icon-settings.svg",
-        l10nID: getLocaleID("chat-settings-title" as any) || "Settings",
-        onClick: () => {
-          openSettingsWindow();
-        },
-      },
-    ],
-    onInit: ({ body }) => {
-      const paneUID = Zotero.Utilities.randomString(8);
-      body.dataset.paneUid = paneUID;
-    },
-    onRender: ({ body, item }) => {
-      const paneUID = body.dataset.paneUid;
-      if (!paneUID) return;
-
-      let chatUI = activeChatUIs[paneUID];
-      if (!chatUI) {
-        chatUI = new ChatUI(body);
-        activeChatUIs[paneUID] = chatUI;
-      }
-
-      chatUI.update(item);
-    },
-    onDestroy: ({ body }) => {
-      const paneUID = body.dataset.paneUid;
-      if (paneUID && activeChatUIs[paneUID]) {
-        activeChatUIs[paneUID].destroy();
-        delete activeChatUIs[paneUID];
-      }
-    },
-  });
-}
-
-function openSettingsWindow() {
-  const win = Zotero.getMainWindow();
-  if (win) {
-    win.openDialog(
-      "chrome://zoteroask/content/settings.xhtml",
-      "zoteroask-settings",
-      "chrome,centerscreen,resizable=yes",
-      Zotero,
-    );
-  }
-}
-
-class ChatUI {
+export class ChatUI {
   private history: {
     role: "user" | "assistant" | "system" | "tool";
     content: string;
@@ -139,8 +24,6 @@ class ChatUI {
   }
 
   update(item: Zotero.Item) {
-    // If item changes, maybe clear chat? For now, we just update context.
-    // If we want to clear chat on item change:
     if (this.currentItem && this.currentItem.id !== item.id) {
       this.clearChat();
     }
@@ -149,8 +32,6 @@ class ChatUI {
 
   destroy() {
     // Cleanup listeners if any (e.g. reader listeners)
-    // Zotero.Reader.unregisterEventListener if we stored it?
-    // The original code tried to register it every render, which might rely on it being idempotent or throwing.
   }
 
   clearChat() {
@@ -159,7 +40,7 @@ class ChatUI {
   }
 
   private renderInitialUI() {
-    this.container.innerHTML = ""; // Clear root
+    this.container.innerHTML = "";
 
     // Read Preferences
     const fontSizePref = getPref("font_size") as string;
@@ -195,6 +76,7 @@ class ChatUI {
     mainDiv.style.display = "flex";
     mainDiv.style.flexDirection = "column";
     mainDiv.style.height = "100%";
+    mainDiv.style.overflow = "hidden";
     mainDiv.style.fontFamily =
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
     mainDiv.style.position = "relative";
@@ -203,12 +85,13 @@ class ChatUI {
     this.messagesArea = this.container.ownerDocument!.createElement("div");
     this.messagesArea.id = "zotero-ask-messages";
     this.messagesArea.style.flexGrow = "1";
+    this.messagesArea.style.flexShrink = "1";
     this.messagesArea.style.overflowY = "auto";
     this.messagesArea.style.padding = "10px";
     this.messagesArea.style.display = "flex";
     this.messagesArea.style.flexDirection = "column";
     this.messagesArea.style.gap = "12px";
-    this.messagesArea.style.minHeight = "200px";
+    this.messagesArea.style.minHeight = "0";
     mainDiv.appendChild(this.messagesArea);
 
     // Input Area
@@ -356,8 +239,8 @@ class ChatUI {
     }
   }
 
-  private async sendMessage() {
-    const value = this.textarea.value.trim();
+  private async sendMessage(regenerateMessage?: string) {
+    const value = regenerateMessage ?? this.textarea.value.trim();
     if (!value) return;
 
     this.textarea.disabled = true;
@@ -366,20 +249,24 @@ class ChatUI {
     this.sendBtn.style.cursor = "not-allowed";
 
     let fullMessage = value;
-    const context = this.selectionTextSpan.dataset.fullText;
-    if (context && this.selectionContainer.style.display !== "none") {
-      fullMessage = `Context: """${context}"""\n\nQuestion: ${value}`;
-      this.selectionContainer.style.display = "none";
-      this.selectionTextSpan.textContent = "";
-      this.selectionTextSpan.dataset.fullText = "";
+
+    // Only process selection context and append user bubble for new messages (not regenerate)
+    if (!regenerateMessage) {
+      const context = this.selectionTextSpan.dataset.fullText;
+      if (context && this.selectionContainer.style.display !== "none") {
+        fullMessage = `Context: """${context}"""\n\nQuestion: ${value}`;
+        this.selectionContainer.style.display = "none";
+        this.selectionTextSpan.textContent = "";
+        this.selectionTextSpan.dataset.fullText = "";
+      }
+
+      const userMsgId = this.generateId();
+      this.appendMessage(fullMessage, "You", userMsgId);
+      this.history.push({ role: "user", content: fullMessage, id: userMsgId });
+
+      this.textarea.value = "";
+      this.textarea.style.height = "auto";
     }
-
-    const userMsgId = this.generateId();
-    this.appendMessage(fullMessage, "You", userMsgId);
-    this.history.push({ role: "user", content: fullMessage, id: userMsgId });
-
-    this.textarea.value = "";
-    this.textarea.style.height = "auto";
 
     const aiMsgId = this.generateId();
     const updateAiMessage = this.appendMessage(
@@ -402,9 +289,11 @@ class ChatUI {
     const reasoningSteps: ReasoningStep[] = [];
     // Start with a model thinking step
     reasoningSteps.push({ type: "model", status: "thinking", content: "" });
+    // Track text for the current model step (reset per model call)
+    let currentStepText = "";
 
     try {
-      const { agent } = await import("../services/agent");
+      const { agent } = await import("../../services/agent");
 
       const systemPrompt =
         (getPref("system_prompt") as string) || DEFAULT_SYSTEM_PROMPT;
@@ -448,22 +337,23 @@ class ChatUI {
         });
       }
 
-      const { registry } = await import("../services/tools");
+      const { registry } = await import("../../services/tools");
 
       await agent.run(
         cleanHistory as any,
         {
           onToken: async (token: string) => {
+            currentStepText += token;
             aiResponseText += token;
             // Update the current model step content
             const lastModelStep = [...reasoningSteps]
               .reverse()
               .find((s) => s.type === "model");
             if (lastModelStep && lastModelStep.type === "model") {
-              lastModelStep.content = aiResponseText;
+              lastModelStep.content = currentStepText;
             }
-            const html = await marked.parse(aiResponseText);
-            updateAiMessage(html, reasoningSteps);
+            const html = await this.buildAgentResponseHtml(reasoningSteps);
+            updateAiMessage(html);
           },
           onRequestDebug: (payload: any) => {
             this.lastDebugPayload = payload;
@@ -483,7 +373,9 @@ class ChatUI {
               name: toolName,
               args,
             });
-            updateAiMessage(aiResponseText ? "" : "", reasoningSteps);
+            this.buildAgentResponseHtml(reasoningSteps).then((h) =>
+              updateAiMessage(h),
+            );
           },
           onToolResult: async (toolName: string, result: string) => {
             // Update the last tool step with result
@@ -501,8 +393,9 @@ class ChatUI {
               status: "thinking",
               content: "",
             });
-            aiResponseText = ""; // Reset for next model response
-            updateAiMessage("", reasoningSteps);
+            currentStepText = "";
+            const html = await this.buildAgentResponseHtml(reasoningSteps);
+            updateAiMessage(html);
           },
           onComplete: async () => {
             // Mark final model step as done
@@ -511,25 +404,20 @@ class ChatUI {
               .find((s) => s.type === "model");
             if (lastModelStep && lastModelStep.type === "model") {
               lastModelStep.status = "done";
-              lastModelStep.content = aiResponseText;
+              lastModelStep.content = currentStepText;
             }
             this.history.push({
               role: "assistant",
               content: aiResponseText,
               id: aiMsgId,
             });
-            try {
-              const html = await marked.parse(aiResponseText);
-              updateAiMessage(html || aiResponseText, reasoningSteps);
-            } catch (e) {
-              updateAiMessage(aiResponseText, reasoningSteps);
-            }
+            const html = await this.buildAgentResponseHtml(reasoningSteps);
+            updateAiMessage(html);
             this.enableInput();
           },
           onError: (err: Error) => {
             updateAiMessage(
               `<span style="color:red">Error: ${err.message}</span>`,
-              reasoningSteps,
             );
             this.enableInput();
           },
@@ -617,91 +505,138 @@ class ChatUI {
     this.messagesArea.appendChild(rowDiv);
     this.messagesArea.scrollTop = this.messagesArea.scrollHeight;
 
-    // Update function
-    const updateFn = (newText: string, currentReasoningSteps: any[] = []) => {
+    // Update function — just sets innerHTML/textContent
+    const updateFn = (html: string) => {
       if (renderHtml) {
-        // Build Chain of Thought timeline HTML
-        let cotHtml = "";
-        if (currentReasoningSteps.length > 0) {
-          const stepsHtml = currentReasoningSteps
-            .map((step: any) => {
-              if (step.type === "model") {
-                if (step.status !== "thinking") return ""; // hide done model steps
-                return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;color:#888;font-size:0.85em;font-style:italic;">&#x23F3; Thinking...</div>`;
-              } else if (step.type === "tool") {
-                const isRunning = step.status === "running";
-                // Args as pills
-                const argPills = step.args
-                  ? Object.values(step.args)
-                      .map(
-                        (v: any) =>
-                          `<span style="display:inline-block;background:#f0f0f0;border:1px solid #ddd;border-radius:12px;padding:1px 8px;font-size:0.75em;color:#444;margin-right:4px;">${String(v).substring(0, 60)}</span>`,
-                      )
-                      .join("")
-                  : "";
-                const resultHtml = step.result
-                  ? `<div style="margin-top:5px;padding:5px 8px;background:#f6f8fa;border-radius:4px;border-left:3px solid #d0d7de;font-size:0.78em;color:#555;line-height:1.4;">${step.result.substring(0, 300)}${step.result.length > 300 ? "..." : ""}</div>`
-                  : isRunning
-                    ? `<div style="margin-top:3px;font-size:0.78em;color:#888;font-style:italic;">Running...</div>`
-                    : "";
-                return `<div style="padding:5px 0;">
-                  <div style="display:flex;align-items:center;gap:6px;">
-                    <span style="font-size:13px;">&#x1F50D;</span>
-                    <span style="font-size:0.85em;color:#333;font-weight:500;">${step.name.replace(/_/g, " ")}</span>
-                  </div>
-                  ${argPills ? `<div style="margin-top:4px;padding-left:20px;">${argPills}</div>` : ""}
-                  ${resultHtml ? `<div style="padding-left:20px;">${resultHtml}</div>` : ""}
-                </div>`;
-              }
-              return "";
-            })
-            .filter(Boolean)
-            .join(
-              `<div style="height:1px;background:#eee;margin:1px 0;"></div>`,
-            );
-
-          if (stepsHtml) {
-            cotHtml = `<details open="open" style="margin-bottom:10px;border:1px solid #e8e8e8;border-radius:8px;overflow:hidden;">
-              <summary style="cursor:pointer;padding:8px 12px;background:#fafafa;border-bottom:1px solid #e8e8e8;display:flex;align-items:center;gap:6px;list-style:none;font-size:0.85em;font-weight:600;color:#444;">
-                <span>&#x1F4AC;</span>
-                <span style="flex:1;">Chain of Thought</span>
-                <span style="color:#999;font-size:0.8em;">&#x25B2;</span>
-              </summary>
-              <div style="padding:6px 12px;">
-                ${stepsHtml}
-              </div>
-            </details>`;
-          }
-        }
-
         // Fix for XHTML (Zotero) compatibility: self-close void tags
-        // Replace <br>, <hr>, <img>, <input>, <meta>, <link> that aren't already self-closed
-        const fixedText = newText.replace(
+        const fixed = html.replace(
           /<(br|hr|img|input|meta|link)(\s[^>]*)?>(?!\s*\/)/gi,
           "<$1$2 />",
         );
-
         try {
-          textSpan.innerHTML = cotHtml + fixedText;
+          textSpan.innerHTML = fixed;
         } catch (e) {
           Zotero.debug(`ChatUI Parse/Render Error: ${e}`);
-          // Fallback: try without CoT block
-          try {
-            textSpan.innerHTML = fixedText;
-          } catch (e2) {
-            textSpan.textContent = newText;
-          }
+          textSpan.textContent = html;
         }
       } else {
-        textSpan.textContent = newText;
+        textSpan.textContent = html;
       }
       this.messagesArea.scrollTop = this.messagesArea.scrollHeight;
     };
 
     // Initial render
-    updateFn(text, reasoningSteps);
+    updateFn(text);
 
     return updateFn;
+  }
+
+  /**
+   * Parse content into thinking (<think> blocks) and response text.
+   */
+  private splitThinkContent(content: string): {
+    thinking: string;
+    response: string;
+    isStillThinking: boolean;
+  } {
+    let thinking = "";
+    let remaining = content;
+
+    // Extract completed <think>...</think> blocks
+    remaining = remaining.replace(/<think>([\s\S]*?)<\/think>/g, (_, p1) => {
+      thinking += p1;
+      return "";
+    });
+
+    // Check for unclosed <think> tag (still streaming thinking)
+    const unclosedMatch = remaining.match(/<think>([\s\S]*)$/);
+    let isStillThinking = false;
+    if (unclosedMatch) {
+      thinking += unclosedMatch[1];
+      remaining = remaining.replace(/<think>[\s\S]*$/, "");
+      isStillThinking = true;
+    }
+
+    return {
+      thinking: thinking.trim(),
+      response: remaining.trim(),
+      isStillThinking,
+    };
+  }
+
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /**
+   * Build the full HTML for an AI message from its reasoning steps.
+   * Renders sequentially: thoughts → text → tool calls → text → ...
+   */
+  private async buildAgentResponseHtml(steps: any[]): Promise<string> {
+    let html = "";
+
+    for (const step of steps) {
+      if (step.type === "model") {
+        const content = step.content || "";
+        const { thinking, response, isStillThinking } =
+          this.splitThinkContent(content);
+
+        // Collapsible thinking section
+        if (thinking || isStillThinking) {
+          const escapedThinking = this.escapeHtml(thinking || "...");
+          html += `<details${isStillThinking ? ' open="open"' : ""} style="margin-bottom:8px;">
+            <summary style="cursor:pointer;font-size:0.85em;color:#888;padding:4px 0;display:flex;align-items:center;gap:6px;">
+              ${ICONS.Brain} Thought${isStillThinking ? "..." : ""}
+            </summary>
+            <div style="padding:4px 0 4px 20px;font-size:0.82em;color:#666;line-height:1.5;white-space:pre-wrap;">${escapedThinking}</div>
+          </details>`;
+        }
+
+        // Waiting spinner (no content yet, actively thinking)
+        if (step.status === "thinking" && !content) {
+          html += `<div style="display:flex;align-items:center;gap:6px;color:#888;font-size:0.85em;font-style:italic;padding:4px 0;">${ICONS.Loader} Thinking...</div>`;
+        }
+
+        // Response text as markdown
+        if (response) {
+          try {
+            const parsed = await marked.parse(response);
+            html += parsed;
+          } catch (_e) {
+            html += `<p>${this.escapeHtml(response)}</p>`;
+          }
+        }
+      } else if (step.type === "tool") {
+        const isRunning = step.status === "running";
+        const icon = isRunning ? ICONS.Loader : ICONS.CircleCheck;
+
+        // Tool call line
+        html += `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;font-size:0.85em;">`;
+        html += `<span style="display:flex;color:${isRunning ? "#888" : "#1a7f37"};">${icon}</span>`;
+        html += `<span style="font-weight:500;color:#333;">${step.name.replace(/_/g, " ")}</span>`;
+
+        // Arg pills
+        if (step.args) {
+          for (const v of Object.values(step.args)) {
+            html += `<span style="display:inline-block;background:#f0f0f0;border:1px solid #ddd;border-radius:12px;padding:1px 8px;font-size:0.8em;color:#444;margin-left:4px;">${this.escapeHtml(String(v).substring(0, 60))}</span>`;
+          }
+        }
+        html += `</div>`;
+
+        // Result preview
+        if (step.result) {
+          html += `<div style="margin:2px 0 8px 22px;padding:5px 8px;background:#f6f8fa;border-radius:4px;border-left:3px solid #d0d7de;font-size:0.78em;color:#555;line-height:1.4;max-height:100px;overflow-y:auto;">${this.escapeHtml(step.result.substring(0, 300))}${step.result.length > 300 ? "..." : ""}</div>`;
+        } else if (isRunning) {
+          html += `<div style="margin:2px 0 8px 22px;font-size:0.78em;color:#888;font-style:italic;">Running...</div>`;
+        }
+      }
+    }
+
+    return html;
   }
 
   private createActionsDiv(
@@ -727,11 +662,8 @@ class ChatUI {
     actionsDiv.style.zIndex = "10";
 
     const copyBtn = this.createActionButton(ICONS.Copy, "Copy", async () => {
-      const content = renderHtml
-        ? textSpan.textContent || ""
-        : textSpan.textContent || "";
+      const content = textSpan.textContent || "";
       await navigator.clipboard.writeText(content);
-      // Visual feedback omitted for brevity but can be added back
     });
     actionsDiv.appendChild(copyBtn);
 
@@ -740,19 +672,23 @@ class ChatUI {
         ICONS.Refresh,
         "Regenerate",
         () => {
-          // Simple regenerate: remove last AI message and trigger send from history logic?
-          // The original code re-ran the whole stream.
-          // We would need to implement regenerate logic properly in ChatUI if we want it.
-          // For now, removing the row and triggering a "retry" is complex without refactoring history management further.
-          // I'll leave it as a TODO or simple delete for now to match strict refactor.
-          // actually original code did `history = ...` and called `appendMessage`.
+          // Find the last user message content before this AI message
+          const aiIdx = this.history.findIndex((h) => h.id === id);
+          const lastUserMsg = this.history
+            .slice(0, aiIdx === -1 ? undefined : aiIdx)
+            .reverse()
+            .find((h) => h.role === "user");
+          if (!lastUserMsg) return;
+
+          // Remove the AI message from history and DOM
           rowDiv.remove();
           this.history = this.history.filter((h) => h.id !== id);
-          // Trigger re-send? Logic is a bit complex to duplicate here inside createActionsDiv.
-          // Maybe just allow delete.
+
+          // Re-send with the same user message (skips appending a new user bubble)
+          this.sendMessage(lastUserMsg.content);
         },
       );
-      // actionsDiv.appendChild(regenBtn); // Commented out for now to ensure stability first
+      actionsDiv.appendChild(regenBtn);
     }
 
     const deleteBtn = this.createActionButton(ICONS.Trash, "Delete", () => {
@@ -764,7 +700,7 @@ class ChatUI {
     return actionsDiv;
   }
 
-  private createIconButton(svg: string, title: string, onClick: () => void) {
+  private createActionButton(svg: string, title: string, onClick: () => void) {
     const btn = this.container.ownerDocument!.createElement("button");
     btn.style.background = "transparent";
     btn.style.border = "none";
@@ -775,11 +711,6 @@ class ChatUI {
     btn.title = title;
     btn.appendChild(this.createSvgIcon(svg, 20));
     btn.onclick = onClick;
-    return btn;
-  }
-
-  private createActionButton(svg: string, title: string, onClick: () => void) {
-    const btn = this.createIconButton(svg, title, onClick);
     btn.onmouseover = () => {
       btn.style.color = "var(--material-text-color, #24292f)";
       btn.style.backgroundColor = "var(--material-hover, rgba(0,0,0,0.05))";
@@ -788,7 +719,6 @@ class ChatUI {
       btn.style.color = "var(--material-text-medium, #6e7781)";
       btn.style.backgroundColor = "transparent";
     };
-    // adjustments for size?
     const s = btn.querySelector("svg");
     if (s) {
       s.setAttribute("width", "14");
@@ -816,16 +746,16 @@ class ChatUI {
   }
 
   public async showToolsModal() {
-    const { registry } = await import("../services/tools");
-    const tools = registry.getTools();
+    const { registry } = await import("../../services/tools");
+    const tools = registry.getAllTools();
     const win = Zotero.getMainWindow();
     if (!win) return;
 
-    // Serialize tool metadata (not the execute function) and pass executeTool as a callback
     const toolsMeta = tools.map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,
+      enabled: registry.isEnabled(t.name),
     }));
 
     win.openDialog(
@@ -838,6 +768,9 @@ class ChatUI {
           const tool = registry.getTool(name);
           if (!tool) throw new Error(`Tool "${name}" not found`);
           return tool.execute(args);
+        },
+        toggleTool: (name: string, enabled: boolean) => {
+          registry.setEnabled(name, enabled);
         },
       },
     );
