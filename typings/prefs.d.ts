@@ -9,6 +9,9 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "enable": boolean;
       "input": string;
+      "api_key": string;
+      "api_url": string;
+      "model": string;
     };
   }
 }

@@ -1,0 +1,136 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/global.css" type="text/css"?>
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
+        title="Tools Inspector"
+        width="560"
+        height="620"
+        class="dialog">
+
+    <script>
+        <![CDATA[
+        // window.arguments[0] = { tools: [{name, description, parameters}], executeTool: async (name, args) => string }
+        window.onload = function() {
+            const { tools, executeTool } = window.arguments[0];
+            const container = document.getElementById("tools-container");
+
+            if (!tools || tools.length === 0) {
+                const empty = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                empty.style.cssText = "text-align:center;color:#888;padding:24px;font-size:13px;";
+                empty.textContent = "No tools registered.";
+                container.appendChild(empty);
+                return;
+            }
+
+            for (const tool of tools) {
+                const card = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                card.style.cssText = "border:1px solid #d0d7de;border-radius:8px;overflow:hidden;margin-bottom:12px;";
+
+                // Tool header
+                const toolHeader = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                toolHeader.style.cssText = "padding:10px 12px;background:#f6f8fa;border-bottom:1px solid #d0d7de;";
+                const nameEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                nameEl.style.cssText = "font-size:13px;font-weight:600;color:#24292f;";
+                nameEl.textContent = tool.name.replace(/_/g, " ");
+                const descEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                descEl.style.cssText = "font-size:11px;color:#666;margin-top:2px;";
+                descEl.textContent = tool.description;
+                toolHeader.appendChild(nameEl);
+                toolHeader.appendChild(descEl);
+                card.appendChild(toolHeader);
+
+                // Parameters
+                const props = (tool.parameters && tool.parameters.properties) ? tool.parameters.properties : {};
+                const required = (tool.parameters && tool.parameters.required) ? tool.parameters.required : [];
+                if (Object.keys(props).length > 0) {
+                    const paramsDiv = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                    paramsDiv.style.cssText = "padding:8px 12px;border-bottom:1px solid #d0d7de;background:#fff;";
+                    for (const [k, v] of Object.entries(props)) {
+                        const row = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                        row.style.cssText = "font-size:11px;margin-bottom:3px;";
+                        const code = document.createElementNS("http://www.w3.org/1999/xhtml", "code");
+                        code.style.cssText = "background:#f0f0f0;padding:1px 4px;border-radius:3px;";
+                        code.textContent = k;
+                        const meta = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+                        meta.style.cssText = "color:#888;";
+                        meta.textContent = " " + v.type + (required.includes(k) ? " · required" : " · optional") + " — " + (v.description || "");
+                        row.appendChild(code);
+                        row.appendChild(meta);
+                        paramsDiv.appendChild(row);
+                    }
+                    card.appendChild(paramsDiv);
+                }
+
+                // Execute area
+                const execDiv = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                execDiv.style.cssText = "padding:10px 12px;background:#fff;";
+
+                const argsLabel = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                argsLabel.style.cssText = "font-size:11px;color:#666;margin-bottom:4px;";
+                argsLabel.textContent = "Arguments (JSON):";
+                execDiv.appendChild(argsLabel);
+
+                // Build default args
+                const defaultArgs = {};
+                for (const [k, v] of Object.entries(props)) {
+                    defaultArgs[k] = v.type === "string" ? "" : v.type === "number" ? 0 : null;
+                }
+                const argsInput = document.createElementNS("http://www.w3.org/1999/xhtml", "textarea");
+                argsInput.value = JSON.stringify(defaultArgs, null, 2);
+                argsInput.style.cssText = "width:100%;height:70px;font-family:monospace;font-size:11px;border:1px solid #d0d7de;border-radius:4px;padding:6px;box-sizing:border-box;resize:vertical;";
+                execDiv.appendChild(argsInput);
+
+                const runBtn = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
+                runBtn.textContent = "▶ Run";
+                runBtn.style.cssText = "margin-top:6px;padding:5px 12px;background:#0969da;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;font-weight:500;";
+
+                const resultPre = document.createElementNS("http://www.w3.org/1999/xhtml", "pre");
+                resultPre.style.cssText = "margin-top:8px;padding:8px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:4px;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:150px;overflow-y:auto;display:none;";
+
+                runBtn.addEventListener("click", function() {
+                    runBtn.disabled = true;
+                    runBtn.textContent = "Running...";
+                    resultPre.style.display = "block";
+                    resultPre.style.color = "#666";
+                    resultPre.textContent = "Executing...";
+                    let args;
+                    try {
+                        args = JSON.parse(argsInput.value || "{}");
+                    } catch (e) {
+                        resultPre.style.color = "#cf222e";
+                        resultPre.textContent = "Invalid JSON: " + e.message;
+                        runBtn.disabled = false;
+                        runBtn.textContent = "▶ Run";
+                        return;
+                    }
+                    executeTool(tool.name, args).then(function(result) {
+                        resultPre.style.color = "#1a7f37";
+                        resultPre.textContent = result;
+                    }).catch(function(e) {
+                        resultPre.style.color = "#cf222e";
+                        resultPre.textContent = "Error: " + e.message;
+                    }).finally(function() {
+                        runBtn.disabled = false;
+                        runBtn.textContent = "▶ Run";
+                    });
+                });
+
+                execDiv.appendChild(runBtn);
+                execDiv.appendChild(resultPre);
+                card.appendChild(execDiv);
+                container.appendChild(card);
+            }
+        };
+        ]]>
+    </script>
+
+    <vbox flex="1" style="padding: 10px; overflow: hidden;">
+        <html:h2 style="margin: 0 0 10px 0; font-size: 14px;">&#x1F527; Tools Inspector</html:h2>
+        <html:div id="tools-container"
+            style="flex: 1; overflow-y: auto; padding-right: 4px;">
+        </html:div>
+        <hbox pack="end" style="margin-top: 8px;">
+            <button label="Close" oncommand="window.close()" />
+        </hbox>
+    </vbox>
+</window>

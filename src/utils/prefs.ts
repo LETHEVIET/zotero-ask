@@ -9,8 +9,8 @@ const PREFS_PREFIX = config.prefsPrefix;
  * Wrapper of `Zotero.Prefs.get`.
  * @param key
  */
-export function getPref<K extends keyof PluginPrefsMap>(key: K) {
-  return Zotero.Prefs.get(`${PREFS_PREFIX}.${key}`, true) as PluginPrefsMap[K];
+export function getPref(key: string) {
+  return Zotero.Prefs.get(`${PREFS_PREFIX}.${key}`, true);
 }
 
 /**

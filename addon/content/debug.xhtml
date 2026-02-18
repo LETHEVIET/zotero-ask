@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/global.css" type="text/css"?>
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
+        title="Debug Payload"
+        width="600"
+        height="500"
+        class="dialog">
+
+    <script>
+        <![CDATA[
+        window.onload = function() {
+            const payload = window.arguments[0];
+            const pre = document.getElementById("payload");
+            pre.textContent = payload
+                ? JSON.stringify(JSON.parse(payload), null, 2)
+                : "No request made yet.";
+        };
+        ]]>
+    </script>
+
+    <vbox flex="1" style="padding: 10px; overflow: hidden;">
+        <html:h2 style="margin: 0 0 8px 0; font-size: 14px;">Debug Payload</html:h2>
+        <html:pre id="payload"
+            style="flex: 1; overflow: auto; background: #f6f8fa; border: 1px solid #d0d7de;
+                   border-radius: 6px; padding: 10px; font-size: 12px; font-family: monospace;
+                   white-space: pre-wrap; word-break: break-all; margin: 0;">
+        </html:pre>
+        <hbox pack="end" style="margin-top: 8px;">
+            <button label="Close" oncommand="window.close()" />
+        </hbox>
+    </vbox>
+</window>

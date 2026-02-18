@@ -1,0 +1,113 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/global.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
+        title="AI Settings"
+        width="400"
+        height="300"
+        class="dialog">
+
+    <linkset>
+        <html:link rel="localization" href="zoteroask-addon.ftl"/>
+    </linkset>
+
+    <script>
+        <![CDATA[
+        function loadPrefs() {
+           const Zotero = window.arguments[0];
+           const prefs = Zotero.Prefs;
+           
+           // AI Settings
+           document.getElementById("api_key").value = prefs.get("extensions.zotero.zoteroask.api_key", true) || "";
+           document.getElementById("api_url").value = prefs.get("extensions.zotero.zoteroask.api_url", true) || "";
+           document.getElementById("model").value = prefs.get("extensions.zotero.zoteroask.model", true) || "";
+           document.getElementById("system_prompt").value = prefs.get("extensions.zotero.zoteroask.system_prompt", true) || "";
+
+           // General Settings
+           document.getElementById("font_size").value = prefs.get("extensions.zotero.zoteroask.font_size", true) || "medium";
+           document.getElementById("theme").value = prefs.get("extensions.zotero.zoteroask.theme", true) || "auto";
+        }
+
+        function savePrefs() {
+           const Zotero = window.arguments[0];
+           const prefs = Zotero.Prefs;
+           
+           // AI Settings
+           prefs.set("extensions.zotero.zoteroask.api_key", document.getElementById("api_key").value, true);
+           prefs.set("extensions.zotero.zoteroask.api_url", document.getElementById("api_url").value, true);
+           prefs.set("extensions.zotero.zoteroask.model", document.getElementById("model").value, true);
+           prefs.set("extensions.zotero.zoteroask.system_prompt", document.getElementById("system_prompt").value, true);
+
+           // General Settings
+           prefs.set("extensions.zotero.zoteroask.font_size", document.getElementById("font_size").value, true);
+           prefs.set("extensions.zotero.zoteroask.theme", document.getElementById("theme").value, true);
+
+           window.close();
+        }
+
+        function cancel() {
+            window.close();
+        }
+
+        window.onload = loadPrefs;
+        ]]>
+    </script>
+
+    <vbox flex="1" style="padding: 10px;">
+        <html:h2 data-l10n-id="zoteroask-chat-settings-title" style="margin-bottom: 10px;">AI Settings</html:h2>
+
+        <tabbox flex="1">
+            <tabs>
+                <tab data-l10n-id="zoteroask-chat-settings-tab-general" label="General"/>
+                <tab data-l10n-id="zoteroask-chat-settings-tab-ai" label="AI Configuration"/>
+            </tabs>
+            <tabpanels flex="1">
+                <!-- General Tab -->
+                <tabpanel>
+                    <vbox flex="1" style="padding: 10px;">
+                        <html:label data-l10n-id="zoteroask-chat-settings-font-size" for="font_size" style="font-weight: bold;"></html:label>
+                        <menulist id="font_size" style="margin-bottom: 15px;">
+                            <menupopup>
+                                <menuitem label="Small" value="small"/>
+                                <menuitem label="Medium" value="medium"/>
+                                <menuitem label="Large" value="large"/>
+                            </menupopup>
+                        </menulist>
+
+                        <html:label data-l10n-id="zoteroask-chat-settings-theme" for="theme" style="font-weight: bold;"></html:label>
+                        <menulist id="theme" style="margin-bottom: 15px;">
+                            <menupopup>
+                                <menuitem label="Auto" value="auto"/>
+                                <menuitem label="Light" value="light"/>
+                                <menuitem label="Dark" value="dark"/>
+                            </menupopup>
+                        </menulist>
+                    </vbox>
+                </tabpanel>
+
+                <!-- AI Configuration Tab -->
+                <tabpanel>
+                    <vbox flex="1" style="padding: 10px;">
+                        <html:label data-l10n-id="zoteroask-chat-settings-api-key" for="api_key" style="font-weight: bold;"></html:label>
+                        <html:input id="api_key" type="password" style="margin-bottom: 10px; width: 100%;"/>
+
+                        <html:label data-l10n-id="zoteroask-chat-settings-api-url" for="api_url" style="font-weight: bold;"></html:label>
+                        <html:input id="api_url" type="text" style="margin-bottom: 10px; width: 100%;"/>
+
+                        <html:label data-l10n-id="zoteroask-chat-settings-model" for="model" style="font-weight: bold;"></html:label>
+                        <html:input id="model" type="text" style="margin-bottom: 10px; width: 100%;"/>
+                        
+                        <html:label data-l10n-id="zoteroask-chat-settings-system-prompt" for="system_prompt" style="font-weight: bold;"></html:label>
+                        <html:textarea id="system_prompt" rows="4" style="margin-bottom: 10px; width: 100%; font-family: monospace;" placeholder="Default: You are a helpful assistant built into Zotero..."/>
+                    </vbox>
+                </tabpanel>
+            </tabpanels>
+        </tabbox>
+
+        <hbox pack="end" style="margin-top: 10px;">
+            <button label="Cancel" oncommand="cancel()" data-l10n-id="zoteroask-chat-settings-cancel"/>
+            <button label="Save" oncommand="savePrefs()" data-l10n-id="zoteroask-chat-settings-save" default="true"/>
+        </hbox>
+    </vbox>
+</window>

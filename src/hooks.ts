@@ -1,4 +1,4 @@
-import { ChatPanel } from "./modules/chat";
+import { registerChatPanel } from "./modules/chat";
 import { getString, initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 
@@ -11,7 +11,7 @@ async function onStartup() {
 
   initLocale();
 
-  ChatPanel.register();
+  registerChatPanel();
 
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
