@@ -1,16 +1,12 @@
 import { type Tool } from "../services/tools";
-import {
-  getDocumentContext,
-  extractHeadings,
-  readSnapshotHtml,
-} from "./document-helpers";
+import { getActiveReader } from "./document-helpers";
 
 export { getActiveReader, getPDFViewerApplication } from "./document-helpers";
 
 export const getDocumentOutlineTool: Tool = {
   name: "get_document_outline",
   description:
-    "Get the outline/structure of the currently open document. For PDFs, returns the Table of Contents with page numbers. For webpage snapshots, returns the heading hierarchy (h1-h6).",
+    "Get the outline/structure of the currently open document. For PDFs, returns the Table of Contents with page numbers. For EPUBs, returns the navigation TOC. For webpage snapshots, returns the heading hierarchy.",
   parameters: {
     type: "object",
     properties: {},
@@ -18,90 +14,62 @@ export const getDocumentOutlineTool: Tool = {
     additionalProperties: false,
   },
   execute: async () => {
-    const ctx = await getDocumentContext();
+    const reader = getActiveReader();
+    if (!reader) return "No document is currently open in the reader.";
 
-    if (ctx.type === "none") {
-      return "No document is currently open.";
+    try {
+      await (reader as any)._initPromise;
+
+      const type = (reader as any)._type || "unknown"; // 'pdf', 'epub', 'snapshot'
+      const internalReader = (reader as any)._internalReader;
+      if (!internalReader) return "Internal reader not ready.";
+
+      // The outline is lazily loaded — trigger it by switching sidebar view
+      internalReader.setSidebarView("outline");
+
+      // Wait for outline to populate in the reader state (max 5s)
+      let maxWait = 50;
+      while (!internalReader._state?.outline && maxWait-- > 0) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const rawOutline = internalReader._state?.outline;
+      if (!rawOutline) {
+        return "This document has no outline/table of contents.";
+      }
+
+      // Clone out of the content compartment via JSON round-trip
+      const outline = JSON.parse(JSON.stringify(rawOutline)) as any[];
+
+      if (!outline || outline.length === 0) {
+        return "This document has no outline/table of contents.";
+      }
+
+      function formatOutline(items: any[], depth = 0): string[] {
+        const lines: string[] = [];
+        for (const item of items) {
+          // PDF:      item.location.position.pageIndex
+          // EPUB:     item.location.href
+          // Snapshot: item.location.position (CSS selector)
+          let locStr = "";
+          if (item.location?.position?.pageIndex !== undefined) {
+            locStr = ` (page ${item.location.position.pageIndex + 1})`;
+          } else if (item.location?.href) {
+            locStr = ` [${item.location.href}]`;
+          }
+          lines.push("  ".repeat(depth) + item.title + locStr);
+          if (item.items && item.items.length > 0) {
+            lines.push(...formatOutline(item.items, depth + 1));
+          }
+        }
+        return lines;
+      }
+
+      const header = `[${type.toUpperCase()}] Document Outline (${outline.length} top-level entries):\n`;
+      return header + formatOutline(outline).join("\n");
+    } catch (e: any) {
+      Zotero.debug(`[ZoteroAsk] Outline error: ${e.message}\n${e.stack}`);
+      return `Error reading outline: ${e.message}`;
     }
-
-    if (ctx.type === "snapshot") {
-      return await getSnapshotOutline(ctx.snapshotPath!);
-    }
-
-    // PDF path
-    return await getPdfOutline(ctx.pdfApp);
   },
 };
-
-async function getSnapshotOutline(filePath: string): Promise<string> {
-  try {
-    const html = await readSnapshotHtml(filePath);
-    const headings = extractHeadings(html);
-
-    if (headings.length === 0) {
-      return "This webpage has no headings.";
-    }
-
-    const minLevel = Math.min(...headings.map((h) => h.level));
-    const lines = headings.map(
-      (h) => `${"  ".repeat(h.level - minLevel)}${h.text}`,
-    );
-    return `Webpage Outline (${headings.length} headings):\n${lines.join("\n")}`;
-  } catch (e: any) {
-    return `Error reading snapshot outline: ${e.message}`;
-  }
-}
-
-async function getPdfOutline(pdfApp: any): Promise<string> {
-  if (!pdfApp?.pdfDocument) return "No PDF document is loaded.";
-
-  try {
-    const outline = await pdfApp.pdfDocument.getOutline();
-    if (!outline || outline.length === 0) {
-      return "This document has no outline/table of contents.";
-    }
-
-    const pdfDoc = pdfApp.pdfDocument;
-
-    const resolvePageNumber = async (item: any): Promise<number | null> => {
-      try {
-        let dest = item.dest;
-        if (typeof dest === "string") {
-          dest = await pdfDoc.getDestination(dest);
-        }
-        if (Array.isArray(dest) && dest[0]) {
-          const pageIndex = await pdfDoc.getPageIndex(dest[0]);
-          return pageIndex + 1;
-        }
-      } catch (_e) {
-        // Some destinations can't be resolved
-      }
-      return null;
-    };
-
-    const walkOutline = async (
-      items: any[],
-      depth = 0,
-    ): Promise<{ title: string; page: number | null; depth: number }[]> => {
-      const result: { title: string; page: number | null; depth: number }[] =
-        [];
-      for (const item of items) {
-        const page = await resolvePageNumber(item);
-        result.push({ title: item.title, page, depth });
-        if (item.items && item.items.length > 0) {
-          result.push(...(await walkOutline(item.items, depth + 1)));
-        }
-      }
-      return result;
-    };
-
-    const entries = await walkOutline(outline);
-    const lines = entries.map(
-      (e) =>
-        `${"  ".repeat(e.depth)}${e.title}${e.page !== null ? ` (page ${e.page})` : ""}`,
-    );
-    return lines.join("\n");
-  } catch (e: any) {
-    return `Error reading outline: ${e.message}`;
-  }
-}

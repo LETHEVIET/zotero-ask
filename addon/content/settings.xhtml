@@ -4,46 +4,238 @@
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         xmlns:html="http://www.w3.org/1999/xhtml"
         title="AI Settings"
-        width="400"
-        height="300"
+        width="560"
+        height="520"
         class="dialog">
 
     <linkset>
         <html:link rel="localization" href="zoteroask-addon.ftl"/>
     </linkset>
 
+    <html:style>
+        .settings-root {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            padding: 12px;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        .settings-root h2 { margin: 0 0 10px 0; font-size: 16px; }
+        .tab-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            min-height: 0;
+        }
+        .bottom-bar {
+            flex-shrink: 0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+            margin-top: 8px;
+        }
+        .model-list {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            max-height: 140px;
+            overflow-y: auto;
+            margin-bottom: 8px;
+            background: #fafafa;
+        }
+        .model-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            gap: 8px;
+        }
+        .model-item:last-child { border-bottom: none; }
+        .model-item:hover { background: #e8f0fe; }
+        .model-item.selected { background: #d2e3fc; font-weight: 500; }
+        .model-item-name { flex: 1; }
+        .model-item-model { color: #666; font-size: 0.85em; }
+        .model-btn-row { display: flex; gap: 6px; margin-bottom: 12px; }
+        .model-btn-row button { font-size: 12px; }
+        .model-form label { display: block; font-weight: bold; margin-bottom: 2px; margin-top: 8px; font-size: 12px; }
+        .model-form input { width: 100%; margin-bottom: 4px; box-sizing: border-box; }
+        .model-form textarea.api-keys {
+            width: 100%; margin-bottom: 2px; box-sizing: border-box;
+            font-family: monospace; font-size: 11px; resize: vertical;
+        }
+        .model-form .hint { font-size: 10px; color: #888; margin-bottom: 4px; display: block; }
+    </html:style>
+
     <script>
         <![CDATA[
-        function loadPrefs() {
-           const Zotero = window.arguments[0];
-           const prefs = Zotero.Prefs;
-           
-           // AI Settings
-           document.getElementById("api_key").value = prefs.get("extensions.zotero.zoteroask.api_key", true) || "";
-           document.getElementById("api_url").value = prefs.get("extensions.zotero.zoteroask.api_url", true) || "";
-           document.getElementById("model").value = prefs.get("extensions.zotero.zoteroask.model", true) || "";
-           document.getElementById("system_prompt").value = prefs.get("extensions.zotero.zoteroask.system_prompt", true) || "";
+        let models = [];
+        let selectedIdx = -1;
 
-           // General Settings
-           document.getElementById("font_size").value = prefs.get("extensions.zotero.zoteroask.font_size", true) || "medium";
-           document.getElementById("theme").value = prefs.get("extensions.zotero.zoteroask.theme", true) || "auto";
+        function generateId() {
+            return Math.random().toString(36).substring(2, 11);
+        }
+
+        function loadPrefs() {
+            const Zotero = window.arguments[0];
+            const prefs = Zotero.Prefs;
+            const prefix = "extensions.zotero.zoteroask";
+
+            // General Settings
+            document.getElementById("font_size").value = prefs.get(prefix + ".font_size", true) || "medium";
+            document.getElementById("theme").value = prefs.get(prefix + ".theme", true) || "auto";
+            document.getElementById("system_prompt").value = prefs.get(prefix + ".system_prompt", true) || "";
+
+            // Load models
+            let modelsJson = prefs.get(prefix + ".models", true) || "[]";
+            try {
+                models = JSON.parse(modelsJson);
+            } catch (e) {
+                models = [];
+            }
+
+            // Migration: if no models exist, migrate legacy single-model prefs
+            if (models.length === 0) {
+                const legacyKey = prefs.get(prefix + ".api_key", true) || "";
+                const legacyUrl = prefs.get(prefix + ".api_url", true) || "";
+                const legacyModel = prefs.get(prefix + ".model", true) || "";
+                if (legacyKey || legacyUrl || legacyModel) {
+                    models.push({
+                        id: generateId(),
+                        name: legacyModel || "Default",
+                        api_url: legacyUrl || "https://api.openai.com/v1",
+                        api_keys: legacyKey ? [legacyKey] : [],
+                        model: legacyModel || "gpt-4o"
+                    });
+                }
+            }
+
+            renderModelList();
+            if (models.length > 0) {
+                selectModel(0);
+            } else {
+                clearForm();
+            }
+        }
+
+        function renderModelList() {
+            const listEl = document.getElementById("model-list");
+            listEl.innerHTML = "";
+            models.forEach(function(m, i) {
+                const div = document.createElement("div");
+                div.className = "model-item" + (i === selectedIdx ? " selected" : "");
+                div.onclick = function() { selectModel(i); };
+
+                const nameSpan = document.createElement("span");
+                nameSpan.className = "model-item-name";
+                nameSpan.textContent = m.name || "(unnamed)";
+                div.appendChild(nameSpan);
+
+                const keysCount = (m.api_keys || []).filter(function(k) { return k.trim(); }).length;
+                const badge = document.createElement("span");
+                badge.style.cssText = "font-size:10px;color:#888;margin-right:4px;";
+                badge.textContent = keysCount + " key" + (keysCount !== 1 ? "s" : "");
+                div.appendChild(badge);
+
+                const modelSpan = document.createElement("span");
+                modelSpan.className = "model-item-model";
+                modelSpan.textContent = m.model || "";
+                div.appendChild(modelSpan);
+
+                listEl.appendChild(div);
+            });
+        }
+
+        function selectModel(idx) {
+            selectedIdx = idx;
+            renderModelList();
+            if (idx >= 0 && idx < models.length) {
+                const m = models[idx];
+                document.getElementById("m_name").value = m.name || "";
+                document.getElementById("m_api_url").value = m.api_url || "";
+                document.getElementById("m_api_keys").value = (m.api_keys || []).join("\n");
+                document.getElementById("m_model").value = m.model || "";
+                setFormEnabled(true);
+            } else {
+                clearForm();
+            }
+        }
+
+        function clearForm() {
+            document.getElementById("m_name").value = "";
+            document.getElementById("m_api_url").value = "";
+            document.getElementById("m_api_keys").value = "";
+            document.getElementById("m_model").value = "";
+            setFormEnabled(false);
+        }
+
+        function setFormEnabled(enabled) {
+            document.getElementById("m_name").disabled = !enabled;
+            document.getElementById("m_api_url").disabled = !enabled;
+            document.getElementById("m_api_keys").disabled = !enabled;
+            document.getElementById("m_model").disabled = !enabled;
+        }
+
+        function syncFormToModel() {
+            if (selectedIdx < 0 || selectedIdx >= models.length) return;
+            models[selectedIdx].name = document.getElementById("m_name").value;
+            models[selectedIdx].api_url = document.getElementById("m_api_url").value;
+            models[selectedIdx].api_keys = document.getElementById("m_api_keys").value
+                .split("\n").map(function(k) { return k.trim(); }).filter(function(k) { return k.length > 0; });
+            models[selectedIdx].model = document.getElementById("m_model").value;
+            renderModelList();
+        }
+
+        function addModel() {
+            const newModel = {
+                id: generateId(),
+                name: "New Model",
+                api_url: "https://api.openai.com/v1",
+                api_keys: [],
+                model: ""
+            };
+            models.push(newModel);
+            selectModel(models.length - 1);
+        }
+
+        function removeModel() {
+            if (selectedIdx < 0 || selectedIdx >= models.length) return;
+            models.splice(selectedIdx, 1);
+            if (models.length === 0) {
+                selectedIdx = -1;
+                clearForm();
+            } else {
+                selectModel(Math.min(selectedIdx, models.length - 1));
+            }
+            renderModelList();
         }
 
         function savePrefs() {
-           const Zotero = window.arguments[0];
-           const prefs = Zotero.Prefs;
-           
-           // AI Settings
-           prefs.set("extensions.zotero.zoteroask.api_key", document.getElementById("api_key").value, true);
-           prefs.set("extensions.zotero.zoteroask.api_url", document.getElementById("api_url").value, true);
-           prefs.set("extensions.zotero.zoteroask.model", document.getElementById("model").value, true);
-           prefs.set("extensions.zotero.zoteroask.system_prompt", document.getElementById("system_prompt").value, true);
+            // Sync current form edits before saving
+            syncFormToModel();
 
-           // General Settings
-           prefs.set("extensions.zotero.zoteroask.font_size", document.getElementById("font_size").value, true);
-           prefs.set("extensions.zotero.zoteroask.theme", document.getElementById("theme").value, true);
+            const Zotero = window.arguments[0];
+            const prefs = Zotero.Prefs;
+            const prefix = "extensions.zotero.zoteroask";
 
-           window.close();
+            // General Settings
+            prefs.set(prefix + ".font_size", document.getElementById("font_size").value, true);
+            prefs.set(prefix + ".theme", document.getElementById("theme").value, true);
+            prefs.set(prefix + ".system_prompt", document.getElementById("system_prompt").value, true);
+
+            // Models
+            prefs.set(prefix + ".models", JSON.stringify(models), true);
+
+            // Ensure active_model_id is valid
+            const activeId = prefs.get(prefix + ".active_model_id", true) || "";
+            if (models.length > 0 && !models.find(function(m) { return m.id === activeId; })) {
+                prefs.set(prefix + ".active_model_id", models[0].id, true);
+            }
+
+            window.close();
         }
 
         function cancel() {
@@ -54,19 +246,19 @@
         ]]>
     </script>
 
-    <vbox flex="1" style="padding: 10px;">
-        <html:h2 data-l10n-id="zoteroask-chat-settings-title" style="margin-bottom: 10px;">AI Settings</html:h2>
+    <html:div class="settings-root">
+        <html:h2 data-l10n-id="zoteroask-chat-settings-title">AI Settings</html:h2>
 
-        <tabbox flex="1">
+        <tabbox flex="1" style="display: flex; flex-direction: column; min-height: 0; flex: 1;">
             <tabs>
                 <tab data-l10n-id="zoteroask-chat-settings-tab-general" label="General"/>
                 <tab data-l10n-id="zoteroask-chat-settings-tab-ai" label="AI Configuration"/>
             </tabs>
-            <tabpanels flex="1">
+            <tabpanels flex="1" style="min-height: 0; flex: 1;">
                 <!-- General Tab -->
-                <tabpanel>
-                    <vbox flex="1" style="padding: 10px;">
-                        <html:label data-l10n-id="zoteroask-chat-settings-font-size" for="font_size" style="font-weight: bold;"></html:label>
+                <tabpanel orient="vertical" style="overflow: hidden;">
+                    <html:div class="tab-scroll">
+                        <html:label data-l10n-id="zoteroask-chat-settings-font-size" for="font_size" style="font-weight: bold; display: block; margin-bottom: 4px;"></html:label>
                         <menulist id="font_size" style="margin-bottom: 15px;">
                             <menupopup>
                                 <menuitem label="Small" value="small"/>
@@ -75,7 +267,7 @@
                             </menupopup>
                         </menulist>
 
-                        <html:label data-l10n-id="zoteroask-chat-settings-theme" for="theme" style="font-weight: bold;"></html:label>
+                        <html:label data-l10n-id="zoteroask-chat-settings-theme" for="theme" style="font-weight: bold; display: block; margin-bottom: 4px;"></html:label>
                         <menulist id="theme" style="margin-bottom: 15px;">
                             <menupopup>
                                 <menuitem label="Auto" value="auto"/>
@@ -83,31 +275,44 @@
                                 <menuitem label="Dark" value="dark"/>
                             </menupopup>
                         </menulist>
-                    </vbox>
+
+                        <html:label data-l10n-id="zoteroask-chat-settings-system-prompt" for="system_prompt" style="font-weight: bold; display: block; margin-bottom: 4px;"></html:label>
+                        <html:textarea id="system_prompt" rows="6" style="width: 100%; font-family: monospace; box-sizing: border-box; resize: vertical;" placeholder="Default: You are a helpful assistant built into Zotero..."/>
+                    </html:div>
                 </tabpanel>
 
                 <!-- AI Configuration Tab -->
-                <tabpanel>
-                    <vbox flex="1" style="padding: 10px;">
-                        <html:label data-l10n-id="zoteroask-chat-settings-api-key" for="api_key" style="font-weight: bold;"></html:label>
-                        <html:input id="api_key" type="password" style="margin-bottom: 10px; width: 100%;"/>
+                <tabpanel orient="vertical" style="overflow: hidden;">
+                    <html:div class="tab-scroll">
+                        <html:label style="font-weight: bold; margin-bottom: 4px; display: block;">Models</html:label>
+                        <html:div id="model-list" class="model-list"></html:div>
+                        <html:div class="model-btn-row">
+                            <button label="+ Add" oncommand="addModel()"/>
+                            <button label="− Remove" oncommand="removeModel()"/>
+                        </html:div>
 
-                        <html:label data-l10n-id="zoteroask-chat-settings-api-url" for="api_url" style="font-weight: bold;"></html:label>
-                        <html:input id="api_url" type="text" style="margin-bottom: 10px; width: 100%;"/>
+                        <html:div class="model-form">
+                            <html:label for="m_name">Display Name</html:label>
+                            <html:input id="m_name" type="text" oninput="syncFormToModel()"/>
 
-                        <html:label data-l10n-id="zoteroask-chat-settings-model" for="model" style="font-weight: bold;"></html:label>
-                        <html:input id="model" type="text" style="margin-bottom: 10px; width: 100%;"/>
-                        
-                        <html:label data-l10n-id="zoteroask-chat-settings-system-prompt" for="system_prompt" style="font-weight: bold;"></html:label>
-                        <html:textarea id="system_prompt" rows="4" style="margin-bottom: 10px; width: 100%; font-family: monospace;" placeholder="Default: You are a helpful assistant built into Zotero..."/>
-                    </vbox>
+                            <html:label for="m_api_url">API URL</html:label>
+                            <html:input id="m_api_url" type="text" oninput="syncFormToModel()"/>
+
+                            <html:label for="m_api_keys">API Keys</html:label>
+                            <html:textarea id="m_api_keys" class="api-keys" rows="3" oninput="syncFormToModel()" placeholder="One key per line"/>
+                            <html:span class="hint">One API key per line — keys are rotated round-robin to avoid rate limits</html:span>
+
+                            <html:label for="m_model">Model ID</html:label>
+                            <html:input id="m_model" type="text" placeholder="e.g. gpt-4o, claude-3-opus" oninput="syncFormToModel()"/>
+                        </html:div>
+                    </html:div>
                 </tabpanel>
             </tabpanels>
         </tabbox>
 
-        <hbox pack="end" style="margin-top: 10px;">
+        <html:div class="bottom-bar">
             <button label="Cancel" oncommand="cancel()" data-l10n-id="zoteroask-chat-settings-cancel"/>
             <button label="Save" oncommand="savePrefs()" data-l10n-id="zoteroask-chat-settings-save" default="true"/>
-        </hbox>
-    </vbox>
+        </html:div>
+    </html:div>
 </window>

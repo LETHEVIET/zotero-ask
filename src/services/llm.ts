@@ -1,7 +1,73 @@
 import "../utils/polyfills";
-import { getPref } from "../utils/prefs";
+import { getPref, setPref } from "../utils/prefs";
 // Import Tool interface (avoiding circular dependency by just using type here if possible, or import)
 import { type Tool } from "./tools";
+
+export type ModelConfig = {
+  id: string;
+  name: string;
+  api_url: string;
+  api_keys: string[];
+  model: string;
+};
+
+// Round-robin key index tracker (per model id)
+const keyIndexMap = new Map<string, number>();
+
+function getNextApiKey(config: ModelConfig): string {
+  const keys = config.api_keys.filter((k) => k.trim().length > 0);
+  if (keys.length === 0) return "";
+  if (keys.length === 1) return keys[0];
+  const currentIdx = keyIndexMap.get(config.id) ?? 0;
+  const key = keys[currentIdx % keys.length];
+  keyIndexMap.set(config.id, (currentIdx + 1) % keys.length);
+  return key;
+}
+
+export function getModels(): ModelConfig[] {
+  try {
+    const json = (getPref("models") as string) || "[]";
+    let models = JSON.parse(json) as any[];
+    // Backward compat: convert legacy api_key string to api_keys array
+    models = models.map((m) => {
+      if (typeof m.api_key === "string" && !m.api_keys) {
+        return { ...m, api_keys: [m.api_key], api_key: undefined };
+      }
+      if (!m.api_keys) m.api_keys = [];
+      return m;
+    }) as ModelConfig[];
+    if (models.length > 0) return models;
+  } catch (_e) {
+    // fall through
+  }
+  // Migration fallback: build from legacy prefs
+  const legacyKey = (getPref("api_key") as string) || "";
+  const legacyUrl =
+    (getPref("api_url") as string) || "https://api.openai.com/v1";
+  const legacyModel = (getPref("model") as string) || "gpt-4o";
+  if (legacyKey || legacyUrl || legacyModel) {
+    const migrated: ModelConfig = {
+      id: Math.random().toString(36).substring(2, 11),
+      name: legacyModel || "Default",
+      api_url: legacyUrl,
+      api_keys: legacyKey ? [legacyKey] : [],
+      model: legacyModel,
+    };
+    return [migrated];
+  }
+  return [];
+}
+
+export function getActiveModelConfig(): ModelConfig | null {
+  const models = getModels();
+  if (models.length === 0) return null;
+  const activeId = (getPref("active_model_id") as string) || "";
+  return models.find((m) => m.id === activeId) || models[0];
+}
+
+export function setActiveModelId(id: string) {
+  setPref("active_model_id" as any, id);
+}
 
 type LLMStreamCallbacks = {
   onToken: (token: string) => void;
@@ -23,10 +89,10 @@ export class LLMClient {
     tools?: any[], // OpenAITools format
   ) {
     try {
-      const apiKey = (getPref("api_key") as string) || "";
-      let baseURL =
-        (getPref("api_url") as string) || "https://api.openai.com/v1";
-      const model = (getPref("model") as string) || "gpt-4o";
+      const activeModel = getActiveModelConfig();
+      const apiKey = activeModel ? getNextApiKey(activeModel) : "";
+      let baseURL = activeModel?.api_url || "https://api.openai.com/v1";
+      const model = activeModel?.model || "gpt-4o";
 
       if (baseURL.endsWith("/")) {
         baseURL = baseURL.slice(0, -1);

@@ -12,6 +12,8 @@ declare namespace _ZoteroTypes {
       "api_key": string;
       "api_url": string;
       "model": string;
+      "models": string;
+      "active_model_id": string;
     };
   }
 }

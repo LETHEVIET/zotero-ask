@@ -1,5 +1,10 @@
 import { marked } from "marked";
 import { getPref } from "../../utils/prefs";
+import {
+  getModels,
+  getActiveModelConfig,
+  setActiveModelId,
+} from "../../services/llm";
 import { ICONS } from "./icons";
 import { DEFAULT_SYSTEM_PROMPT } from "./constants";
 
@@ -18,6 +23,8 @@ export class ChatUI {
   private selectionTextSpan!: HTMLElement;
   private textarea!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
+  private modelSelector!: HTMLElement;
+  private modelSelectorLabel!: HTMLElement;
 
   constructor(private container: HTMLElement) {
     this.renderInitialUI();
@@ -41,6 +48,8 @@ export class ChatUI {
 
   private renderInitialUI() {
     this.container.innerHTML = "";
+    this.container.style.maxHeight = "100vh";
+    this.container.style.overflow = "hidden";
 
     // Read Preferences
     const fontSizePref = getPref("font_size") as string;
@@ -76,6 +85,7 @@ export class ChatUI {
     mainDiv.style.display = "flex";
     mainDiv.style.flexDirection = "column";
     mainDiv.style.height = "100%";
+    mainDiv.style.maxHeight = "100vh";
     mainDiv.style.overflow = "hidden";
     mainDiv.style.fontFamily =
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
@@ -106,62 +116,20 @@ export class ChatUI {
   private renderInputArea(parent: HTMLElement) {
     const inputContainer = this.container.ownerDocument!.createElement("div");
     inputContainer.style.padding = "10px";
-    inputContainer.style.borderTop =
-      "1px solid var(--material-divider, #e1e4e8)";
 
-    // Selection Context
-    this.selectionContainer =
-      this.container.ownerDocument!.createElement("div");
-    this.selectionContainer.style.marginBottom = "8px";
-    this.selectionContainer.style.display = "none";
-    this.selectionContainer.style.alignItems = "center";
-    this.selectionContainer.style.justifyContent = "space-between";
-    this.selectionContainer.style.padding = "4px 8px";
-    this.selectionContainer.style.backgroundColor =
-      "var(--material-background, #fff)";
-    this.selectionContainer.style.border =
-      "1px solid var(--material-divider, #d1d5da)";
-    this.selectionContainer.style.borderRadius = "6px";
-    this.selectionContainer.style.fontSize = "12px";
-    this.selectionContainer.style.color = "var(--material-text-color, #24292f)";
-    this.selectionContainer.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
+    // Outer bordered box (contains textarea + tray)
+    const inputBox = this.container.ownerDocument!.createElement("div");
+    inputBox.style.backgroundColor = "var(--material-background, #fff)";
+    inputBox.style.border = "1px solid var(--material-divider, #d1d5da)";
+    inputBox.style.borderRadius = "12px";
+    inputBox.style.boxShadow = "0 1px 4px rgba(0,0,0,0.06)";
+    inputBox.style.overflow = "hidden";
 
-    this.selectionTextSpan =
-      this.container.ownerDocument!.createElement("span");
-    this.selectionTextSpan.style.whiteSpace = "nowrap";
-    this.selectionTextSpan.style.overflow = "hidden";
-    this.selectionTextSpan.style.textOverflow = "ellipsis";
-    this.selectionTextSpan.style.maxWidth = "200px";
-
-    const closeSelectionBtn =
-      this.container.ownerDocument!.createElement("div");
-    closeSelectionBtn.textContent = "×";
-    closeSelectionBtn.style.cursor = "pointer";
-    closeSelectionBtn.style.fontWeight = "bold";
-    closeSelectionBtn.style.marginLeft = "8px";
-    closeSelectionBtn.style.color = "var(--material-text-medium, #6e7781)";
-    closeSelectionBtn.onclick = () => {
-      this.selectionContainer.style.display = "none";
-      this.selectionTextSpan.textContent = "";
-      this.selectionTextSpan.dataset.fullText = "";
-    };
-
-    this.selectionContainer.appendChild(this.selectionTextSpan);
-    this.selectionContainer.appendChild(closeSelectionBtn);
-    inputContainer.appendChild(this.selectionContainer);
-
-    // Input Wrapper
-    const inputWrapper = this.container.ownerDocument!.createElement("div");
-    inputWrapper.style.display = "flex";
-    inputWrapper.style.alignItems = "flex-end";
-    inputWrapper.style.backgroundColor = "var(--material-background, #fff)";
-    inputWrapper.style.border = "1px solid var(--material-divider, #d1d5da)";
-    inputWrapper.style.borderRadius = "6px";
-    inputWrapper.style.padding = "8px";
-    inputWrapper.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
-
+    // Textarea
     this.textarea = this.container.ownerDocument!.createElement("textarea");
-    this.textarea.style.flexGrow = "1";
+    this.textarea.style.display = "block";
+    this.textarea.style.width = "100%";
+    this.textarea.style.boxSizing = "border-box";
     this.textarea.style.border = "none";
     this.textarea.style.resize = "none";
     this.textarea.style.outline = "none";
@@ -170,7 +138,8 @@ export class ChatUI {
     this.textarea.style.lineHeight = "20px";
     this.textarea.style.maxHeight = "120px";
     this.textarea.style.fontFamily = "inherit";
-    this.textarea.placeholder = "Ask about this document...";
+    this.textarea.style.padding = "12px 12px 4px 12px";
+    this.textarea.placeholder = "What would you like to know?";
     this.textarea.rows = 1;
 
     this.textarea.addEventListener("input", () => {
@@ -185,34 +154,217 @@ export class ChatUI {
       }
     };
 
+    inputBox.appendChild(this.textarea);
+
+    // Bottom Tray (model selector + context + send)
+    const tray = this.container.ownerDocument!.createElement("div");
+    tray.style.display = "flex";
+    tray.style.alignItems = "center";
+    tray.style.padding = "4px 8px 8px 8px";
+    tray.style.gap = "6px";
+
+    // Left side of tray
+    const trayLeft = this.container.ownerDocument!.createElement("div");
+    trayLeft.style.display = "flex";
+    trayLeft.style.alignItems = "center";
+    trayLeft.style.gap = "6px";
+    trayLeft.style.flexGrow = "1";
+    trayLeft.style.flexShrink = "1";
+    trayLeft.style.overflow = "hidden";
+
+    // Selection Context Chip (hidden by default)
+    this.selectionContainer =
+      this.container.ownerDocument!.createElement("div");
+    this.selectionContainer.style.display = "none";
+    this.selectionContainer.style.alignItems = "center";
+    this.selectionContainer.style.gap = "4px";
+    this.selectionContainer.style.padding = "2px 8px";
+    this.selectionContainer.style.backgroundColor =
+      "var(--material-sidepane, #f0f0f0)";
+    this.selectionContainer.style.border =
+      "1px solid var(--material-divider, #d1d5da)";
+    this.selectionContainer.style.borderRadius = "16px";
+    this.selectionContainer.style.fontSize = "11px";
+    this.selectionContainer.style.color = "var(--material-text-color, #24292f)";
+    this.selectionContainer.style.maxWidth = "180px";
+    this.selectionContainer.style.flexShrink = "1";
+
+    const quoteIcon = this.createSvgIcon(ICONS.Quote, 12);
+    quoteIcon.style.flexShrink = "0";
+    this.selectionContainer.appendChild(quoteIcon);
+
+    this.selectionTextSpan =
+      this.container.ownerDocument!.createElement("span");
+    this.selectionTextSpan.style.whiteSpace = "nowrap";
+    this.selectionTextSpan.style.overflow = "hidden";
+    this.selectionTextSpan.style.textOverflow = "ellipsis";
+    this.selectionContainer.appendChild(this.selectionTextSpan);
+
+    const closeSelectionBtn =
+      this.container.ownerDocument!.createElement("div");
+    const closeIcon = this.createSvgIcon(ICONS.X, 10);
+    closeSelectionBtn.appendChild(closeIcon);
+    closeSelectionBtn.style.cursor = "pointer";
+    closeSelectionBtn.style.flexShrink = "0";
+    closeSelectionBtn.style.display = "flex";
+    closeSelectionBtn.style.color = "var(--material-text-medium, #6e7781)";
+    closeSelectionBtn.onclick = () => {
+      this.selectionContainer.style.display = "none";
+      this.selectionTextSpan.textContent = "";
+      this.selectionTextSpan.dataset.fullText = "";
+    };
+    this.selectionContainer.appendChild(closeSelectionBtn);
+
+    trayLeft.appendChild(this.selectionContainer);
+
+    // Model Selector
+    this.modelSelector = this.container.ownerDocument!.createElement("div");
+    this.modelSelector.style.display = "flex";
+    this.modelSelector.style.alignItems = "center";
+    this.modelSelector.style.gap = "2px";
+    this.modelSelector.style.cursor = "pointer";
+    this.modelSelector.style.padding = "2px 8px";
+    this.modelSelector.style.borderRadius = "16px";
+    this.modelSelector.style.fontSize = "12px";
+    this.modelSelector.style.color = "var(--material-text-medium, #6e7781)";
+    this.modelSelector.style.whiteSpace = "nowrap";
+    this.modelSelector.style.userSelect = "none";
+    this.modelSelector.style.transition = "background 0.15s";
+
+    this.modelSelector.onmouseover = () => {
+      this.modelSelector.style.backgroundColor =
+        "var(--material-hover, rgba(0,0,0,0.05))";
+    };
+    this.modelSelector.onmouseout = () => {
+      this.modelSelector.style.backgroundColor = "transparent";
+    };
+
+    this.modelSelectorLabel =
+      this.container.ownerDocument!.createElement("span");
+    this.modelSelector.appendChild(this.modelSelectorLabel);
+
+    const chevron = this.createSvgIcon(ICONS.ChevronDown, 12);
+    chevron.style.flexShrink = "0";
+    this.modelSelector.appendChild(chevron);
+
+    this.updateModelSelectorLabel();
+
+    this.modelSelector.onclick = () => {
+      this.showModelPopup();
+    };
+
+    trayLeft.appendChild(this.modelSelector);
+
+    // Right side — send button
     this.sendBtn = this.container.ownerDocument!.createElement("button");
-    this.sendBtn.style.marginLeft = "8px";
     this.sendBtn.style.padding = "6px";
-    this.sendBtn.style.backgroundColor = "#2da44e";
+    this.sendBtn.style.backgroundColor = "#1a1a1a";
     this.sendBtn.style.color = "#fff";
-    this.sendBtn.style.border = "1px solid rgba(27,31,35,0.15)";
-    this.sendBtn.style.borderRadius = "6px";
+    this.sendBtn.style.border = "none";
+    this.sendBtn.style.borderRadius = "50%";
     this.sendBtn.style.cursor = "pointer";
-    this.sendBtn.style.alignSelf = "center";
     this.sendBtn.style.display = "flex";
     this.sendBtn.style.alignItems = "center";
     this.sendBtn.style.justifyContent = "center";
+    this.sendBtn.style.flexShrink = "0";
+    this.sendBtn.style.width = "28px";
+    this.sendBtn.style.height = "28px";
+    this.sendBtn.style.transition = "background 0.15s";
 
-    const sendIcon = this.createSvgIcon(ICONS.ArrowUp, 16, "#fff");
+    const sendIcon = this.createSvgIcon(ICONS.Send, 14, "#fff");
     this.sendBtn.appendChild(sendIcon);
 
     this.sendBtn.onmouseover = () => {
-      this.sendBtn.style.backgroundColor = "#2c974b";
+      this.sendBtn.style.backgroundColor = "#333";
     };
     this.sendBtn.onmouseout = () => {
-      this.sendBtn.style.backgroundColor = "#2da44e";
+      this.sendBtn.style.backgroundColor = "#1a1a1a";
     };
     this.sendBtn.onclick = () => this.sendMessage();
 
-    inputWrapper.appendChild(this.textarea);
-    inputWrapper.appendChild(this.sendBtn);
-    inputContainer.appendChild(inputWrapper);
+    tray.appendChild(trayLeft);
+    tray.appendChild(this.sendBtn);
+    inputBox.appendChild(tray);
+
+    inputContainer.appendChild(inputBox);
     parent.appendChild(inputContainer);
+  }
+
+  private updateModelSelectorLabel() {
+    const active = getActiveModelConfig();
+    this.modelSelectorLabel.textContent = active?.name || "Select Model";
+  }
+
+  private showModelPopup() {
+    const models = getModels();
+    if (models.length === 0) return;
+
+    const active = getActiveModelConfig();
+    const doc = this.container.ownerDocument!;
+
+    // Remove existing popup if any
+    const existing = doc.getElementById("zotero-ask-model-popup");
+    if (existing) existing.remove();
+
+    const popup = doc.createElement("div");
+    popup.id = "zotero-ask-model-popup";
+    popup.style.position = "fixed";
+    popup.style.zIndex = "10000";
+    popup.style.backgroundColor = "var(--material-background, #fff)";
+    popup.style.border = "1px solid var(--material-divider, #d1d5da)";
+    popup.style.borderRadius = "8px";
+    popup.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)";
+    popup.style.padding = "4px";
+    popup.style.minWidth = "140px";
+
+    // Position above the selector
+    const rect = this.modelSelector.getBoundingClientRect();
+    popup.style.left = rect.left + "px";
+    popup.style.bottom =
+      (doc.documentElement?.clientHeight || 600) - rect.top + 4 + "px";
+
+    for (const m of models) {
+      const item = doc.createElement("div");
+      item.style.padding = "6px 12px";
+      item.style.fontSize = "12px";
+      item.style.cursor = "pointer";
+      item.style.borderRadius = "4px";
+      item.style.color = "var(--material-text-color, #24292f)";
+      if (active && m.id === active.id) {
+        item.style.fontWeight = "600";
+        item.style.backgroundColor = "var(--material-sidepane, #f0f0f0)";
+      }
+      item.textContent = m.name || m.model;
+      item.onmouseover = () => {
+        item.style.backgroundColor = "var(--material-hover, rgba(0,0,0,0.05))";
+      };
+      item.onmouseout = () => {
+        if (active && m.id === active.id) {
+          item.style.backgroundColor = "var(--material-sidepane, #f0f0f0)";
+        } else {
+          item.style.backgroundColor = "transparent";
+        }
+      };
+      item.onclick = () => {
+        setActiveModelId(m.id);
+        this.updateModelSelectorLabel();
+        popup.remove();
+      };
+      popup.appendChild(item);
+    }
+
+    (doc.documentElement ?? doc.body)!.appendChild(popup);
+
+    // Close on outside click
+    const closeHandler = (ev: MouseEvent) => {
+      if (!popup.contains(ev.target as Node)) {
+        popup.remove();
+        doc.removeEventListener("click", closeHandler, true);
+      }
+    };
+    setTimeout(() => {
+      doc.addEventListener("click", closeHandler, true);
+    }, 0);
   }
 
   private registerReaderListener() {
@@ -249,19 +401,30 @@ export class ChatUI {
     this.sendBtn.style.cursor = "not-allowed";
 
     let fullMessage = value;
+    let displayHtml = "";
 
     // Only process selection context and append user bubble for new messages (not regenerate)
     if (!regenerateMessage) {
       const context = this.selectionTextSpan.dataset.fullText;
       if (context && this.selectionContainer.style.display !== "none") {
         fullMessage = `Context: """${context}"""\n\nQuestion: ${value}`;
+        // Build a nicely rendered version for the bubble
+        const truncatedCtx =
+          context.length > 120 ? context.substring(0, 120) + "…" : context;
+        displayHtml =
+          `<div style="padding:4px 8px;margin-bottom:6px;border-left:3px solid rgba(255,255,255,0.4);font-size:0.85em;opacity:0.85;line-height:1.4;">${this.escapeHtml(truncatedCtx)}</div>` +
+          `<div>${this.escapeHtml(value)}</div>`;
         this.selectionContainer.style.display = "none";
         this.selectionTextSpan.textContent = "";
         this.selectionTextSpan.dataset.fullText = "";
       }
 
       const userMsgId = this.generateId();
-      this.appendMessage(fullMessage, "You", userMsgId);
+      if (displayHtml) {
+        this.appendMessage(displayHtml, "You", userMsgId, true);
+      } else {
+        this.appendMessage(value, "You", userMsgId);
+      }
       this.history.push({ role: "user", content: fullMessage, id: userMsgId });
 
       this.textarea.value = "";
